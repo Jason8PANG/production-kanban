@@ -5,7 +5,7 @@ WIPTrack 实时数据 API 服务器
 """
 
 import json
-import pymysql
+import pyodbc
 from datetime import datetime, date
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
@@ -14,11 +14,9 @@ import os
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
 
-MYSQL_HOST = os.environ.get('MYSQL_HOST', 'localhost')
-MYSQL_PORT = int(os.environ.get('MYSQL_PORT', 3306))
-MYSQL_USER = os.environ.get('MYSQL_USER', 'powerbi')
-MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', '')
-MYSQL_DATABASE = os.environ.get('MYSQL_DATABASE', 'wiptrack')
+ODBC_DSN = os.environ.get('ODBC_DSN', 'wiptrack')
+ODBC_UID = os.environ.get('ODBC_UID', 'powerbi')
+ODBC_PWD = os.environ.get('ODBC_PWD', '!Q1234567')
 
 STATION_ORDER = ['Print', 'Cut', 'Pre', 'Asm', 'Test', 'Pack']
 STATION_LABEL = {
@@ -130,7 +128,7 @@ def parse_complete_date(val):
 def get_erp_schedule():
     """从 erp_data.hmlv_production_schedule 表读取排程数据"""
     import pandas as pd
-    conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
+    conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT job, item, qty, ship_date, line, work_hours_h, 
@@ -162,7 +160,7 @@ def get_erp_schedule():
 
 
 def get_data():
-    conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
+    conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM production_records WHERE SiteRef = 'NAIGROUP_PROD_310' ORDER BY id")
     columns = [col[0] for col in cursor.description]
@@ -461,13 +459,15 @@ def api_excel_jobs():
             job_key = str(row['job']).strip()
             job_sales_map[job_key] = float(row['sales_amount'])
 
-        # ========== 工单→Item/工单数/工时映射（全部从数据库erp_data表）==========
+        # ========== 工单→Item/工单数/工时映射（从数据库erp_data表）==========
         job_item_released = {}
         job_hours_map = {}  # job -> work_hours_h
         for _, row in df_all.iterrows():
             j = str(row['job']).strip()
             item = str(row['item']).strip() if pd.notna(row['item']) else ''
+            # 使用 qty 字段作为工单数
             released = int(row['qty']) if pd.notna(row['qty']) else 0
+            # 使用 work_hours_h 字段作为工单总工时
             wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
             if j and j not in job_item_released:
                 job_item_released[j] = (item, released)
@@ -527,9 +527,8 @@ def api_excel_jobs():
                 if station_en == st and dv.startswith(now_month):
                     job = str(r.get(job_col, '') or '').strip()
                     if job:
-                        item, released = job_item_released.get(job, ('', 0))
-                        asm_time = asm_time_map.get(item, 0)
-                        hours += released * asm_time
+                        # 使用数据库 work_hours_h 字段
+                        hours += job_hours_map.get(job, 0)
             station_hours[st] = round(hours, 2)
         result['station_hours'] = station_hours
 
@@ -546,9 +545,8 @@ def api_excel_jobs():
                 station_hours_today[station_en] = 0
             job = str(r.get(job_col, '') or '').strip()
             if job:
-                item, released = job_item_released.get(job, ('', 0))
-                asm_time = asm_time_map.get(item, 0)
-                station_hours_today[station_en] += released * asm_time
+                # 使用数据库 work_hours_h 字段
+                station_hours_today[station_en] += job_hours_map.get(job, 0)
         # 确保所有工序都有值
         for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
             station_hours_today[st] = round(station_hours_today.get(st, 0), 2)
@@ -577,10 +575,9 @@ def api_excel_jobs():
             total_hours, job_count = 0, 0
             for _, row in df_jobs.iterrows():
                 job = str(row['job']).strip()
-                item = str(row['item']).strip() if pd.notna(row['item']) else ''
-                released = int(row['qty']) if pd.notna(row['qty']) else 0
-                asm_time = asm_time_map.get(item, 0)
-                total_hours += released * asm_time
+                # 使用数据库 work_hours_h 字段
+                wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
+                total_hours += wh
                 job_count += 1
             return round(total_hours, 2), job_count
 
@@ -676,7 +673,7 @@ def api_wip():
     try:
         import pandas as pd
 
-        conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
         cursor = conn.cursor()
 
         # 工序顺序（从 site_station 表）
@@ -857,7 +854,7 @@ def api_search_wo():
         return jsonify({'success': False, 'error': '请输入工单号'})
 
     try:
-        conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
         cursor = conn.cursor()
 
         # 用 LIKE 模糊匹配工单号（Job 字段），同时过滤 SiteRef
@@ -967,23 +964,15 @@ def api_hours_daily():
         days_in_month = monthrange(year, month)[1]
         today_day = date.today().day
 
-        # ========== 组装工序单根时间 ==========
-        path_asm = 'I:/Production/01 Cor&Fiber Production/14-手工排产/AI排产文件夹/组装工序单根生产时间.xlsx'
-        df_asm = pd.read_excel(path_asm)
-        asm_cols = df_asm.columns.tolist()
-        df_asm = df_asm[[asm_cols[0], asm_cols[1]]].dropna()
-        df_asm.columns = ['PN', 'AsmTime']
-        asm_time_map = dict(zip(df_asm['PN'].astype(str).str.strip(), df_asm['AsmTime'].astype(float)))
-
         # ========== 总目标工时（从数据库 erp_data.hmlv_production_schedule 计算）==========
         df_erp = get_erp_schedule()
 
         def calc_total_hours_from_db(df_erp):
-            total = 0
+            """使用数据库 work_hours_h 字段计算总工时"""
+            total = 0.0
             for _, row in df_erp.iterrows():
-                item = str(row['item']).strip() if pd.notna(row['item']) else ''
-                qty = int(row['qty']) if pd.notna(row['qty']) else 0
-                total += qty * asm_time_map.get(item, 0)
+                wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
+                total += wh
             return total
 
         total_target = round(calc_total_hours_from_db(df_erp), 2)
@@ -1018,7 +1007,7 @@ def api_hours_daily():
         daily_target = round(total_target / workdays_in_month, 2) if workdays_in_month > 0 else 0
 
         # ========== 从数据库获取当月每日完成工时 ==========
-        conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
         cursor = conn.cursor()
 
         current_month = date.today().strftime('%Y-%m')
@@ -1030,35 +1019,30 @@ def api_hours_daily():
         rows = cursor.fetchall()
         conn.close()
 
-        # 构建 Job→(Item, Qty) 映射（用于查询单根时间和工单数）
-        job_info_map = {}  # job -> (item, qty)
+        # 构建 Job→work_hours_h 映射（使用数据库 work_hours_h 字段）
+        job_hours_map_daily = {}  # job -> work_hours_h
         df_erp = get_erp_schedule()
         for _, r in df_erp.iterrows():
             j = str(r['job']).strip()
-            item = str(r['item']).strip() if pd.notna(r['item']) else ''
-            qty = int(r['qty']) if pd.notna(r['qty']) else 0
-            if j and j not in job_info_map:
-                job_info_map[j] = (item, qty)
+            wh = float(r['work_hours_h']) if pd.notna(r['work_hours_h']) else 0.0
+            if j and j not in job_hours_map_daily:
+                job_hours_map_daily[j] = wh
 
         # 按日期汇总完成工时
         # 策略：每条工序记录都代表该工单完成了某道工序，计入当日完成工时
-        # 工时 = Released（工单数）× 单根组装时间
+        # 工时 = work_hours_h（数据库工单总工时）
         daily_completed = {}  # date_str -> hours
         for row in rows:
             job = str(row[0]).strip()
-            station_raw = str(row[1]).strip()
             cd = parse_complete_date(row[2])
             if not cd:
                 continue
             day_str = cd.strftime('%Y-%m-%d')
 
-            info = job_info_map.get(job, ('', 0))
-            item, released = info
-            asm_time = asm_time_map.get(item, 0)
-            if asm_time == 0 or released == 0:
+            hours = job_hours_map_daily.get(job, 0)
+            if hours == 0:
                 continue
 
-            hours = released * asm_time
             if day_str not in daily_completed:
                 daily_completed[day_str] = 0
             daily_completed[day_str] += hours
