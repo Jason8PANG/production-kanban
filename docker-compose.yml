@@ -9,10 +9,8 @@ services:
       - "8081:5678"
     networks:
       - public-net
-    environment:
-      - ODBC_DSN=wiptrack
-      - ODBC_UID=powerbi
-      - ODBC_PWD='!Q1234567'
+    env_file:
+      - .env
     volumes:
       - ./wiptrack_server.py:/app/wiptrack_server.py:ro
       - ./HMLV生产看板.html:/app/HMLV生产看板.html:ro

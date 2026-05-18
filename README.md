@@ -13,85 +13,109 @@ HMLV生产实时看板系统，用于 310 站点 WIP 后台数据管理和生产
 
 ## 数据源说明
 
-| 数据源 | 数据库类型 | ODBC DSN | 说明 |
+| 数据源 | 数据库类型 | 连接方式 | 说明 |
 |--------|-----------|----------|------|
-| **wiptrack** | MySQL | wiptrack | 生产记录（production_records）和排产计划（hmlv_production_schedule） |
-| **Andon** | MS SQL Server | andon_mssql | Andon 系统数据（生产异常、设备状态等） |
+| **wiptrack** | MySQL | pymysql 原生直连 | 生产记录（production_records）和排产计划（hmlv_production_schedule） |
+| **Andon** | MS SQL Server | pyodbc (ODBC) | Andon 系统数据（生产异常、设备状态等） |
 
-## 快速部署
+## CentOS 快速部署
 
 ### 前置条件
 
 - Docker & Docker Compose
 - **MySQL** 数据库网络可达
-- **MS SQL Server** 数据库网络可达
-- Linux 服务器需配置 MySQL ODBC 和 SQL Server ODBC 驱动
+- **MS SQL Server** 数据库网络可达（如需 Andon 数据）
 
-### 1. 克隆代码
+### 1. 安装 Docker
+
+```bash
+# 安装 Docker
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+sudo yum install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# 启动 Docker
+sudo systemctl start docker
+sudo systemctl enable docker
+```
+
+### 2. 克隆代码
 
 ```bash
 git clone https://github.com/Jason8PANG/production-kanban.git
 cd production-kanban
 ```
 
-### 2. 配置 ODBC 数据源 (Linux)
+### 3. 配置 MySQL 连接 (CentOS)
 
-在 Linux 服务器上安装 ODBC 驱动：
+#### 3.1 安装 MySQL ODBC 驱动（仅用于 Andon SQL Server 数据源）
 
 ```bash
-sudo apt update
-sudo apt install -y unixodbc unixodbc-dev odbcinst1debian2
-# MySQL/MariaDB ODBC 驱动
-sudo apt install -y odbc-mariadb
-# MS SQL Server ODBC 驱动
-curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
-sudo apt update
-sudo ACCEPT_EULA=Y apt install -y msodbcsql18
+# 添加 Microsoft 仓库
+curl -o /etc/yum.repos.d/mssql-release.repo https://packages.microsoft.com/config/rhel/8/prod.repo
+
+# 接受许可并安装
+sudo ACCEPT_EULA=Y yum install -y msodbcsql18
+# 可选：安装命令行工具
+sudo ACCEPT_EULA=Y yum install -y mssql-tools18
 ```
 
-配置 ODBC 数据源，编辑 `/etc/odbc.ini`：
+#### 3.2 配置环境变量
 
-```ini
-[wiptrack]
-Driver      = MariaDB Connector/ODBC 3.1
-Server      = 你的MySQL服务器IP
-Port        = 3306
-Database    = 你的数据库名
-Uid         = powerbi
-PWD         = !Q1234567
+创建 `.env` 文件（基于 `.env.example`）：
 
-[andon_mssql]
-Driver      = ODBC Driver 18 for SQL Server
-Server      = 你的SQLServer服务器IP,1433
-Database    = 你的Andon数据库名
-Uid         = 你的用户名
-PWD         = 你的密码
-Encrypt     = no
-TrustServerCertificate = yes
+```bash
+cp .env.example .env
+nano .env
 ```
 
-> **提示**:
-> - `wiptrack` 数据源指向 **MySQL**（存放生产记录和排产计划）
-> - `andon_mssql` 数据源指向 **MS SQL Server**（存放 Andon 数据）
-> - 数据库服务器 IP、端口和数据库名需要根据实际情况修改
+`.env` 内容示例：
 
-### 3. 创建 Docker 网络
+```env
+# MySQL 直连配置（wiptrack 数据源）
+MYSQL_HOST=你的MySQL服务器IP
+MYSQL_PORT=3306
+MYSQL_USER=powerbi
+MYSQL_PASSWORD=你的密码
+MYSQL_DATABASE=wiptrack
+```
+
+> **提示**：`.env` 文件已在 `.gitignore` 中，不会被提交到 GitHub。
+
+#### 3.3 验证 MySQL 连接
+
+```bash
+# 安装 MySQL 客户端
+sudo yum install -y mysql
+
+# 测试连接
+mysql -h 你的MySQL服务器IP -P 3306 -u powerbi -p
+```
+
+### 4. 创建 Docker 网络
 
 ```bash
 docker network create public-net
 ```
 
-### 4. 启动服务
+### 5. 启动服务
 
 ```bash
 docker compose up -d --build
 ```
 
-### 5. 查看日志
+### 6. 查看日志
 
 ```bash
 docker compose logs -f hmlv-kanban
+```
+
+### 7. 防火墙设置
+
+```bash
+# 开放 8081 端口
+sudo firewall-cmd --permanent --add-port=8081/tcp
+sudo firewall-cmd --reload
 ```
 
 ### 访问服务
@@ -106,9 +130,14 @@ docker compose logs -f hmlv-kanban
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| ODBC_DSN | wiptrack | ODBC 数据源名称 |
-| ODBC_UID | powerbi | 数据库用户名 |
-| ODBC_PWD | !Q1234567 | 数据库密码 |
+| MYSQL_HOST | localhost | MySQL 服务器地址 |
+| MYSQL_PORT | 3306 | MySQL 端口 |
+| MYSQL_USER | powerbi | MySQL 用户名 |
+| MYSQL_PASSWORD |  | MySQL 密码（留空） |
+| SQLSERVER_HOST |  | SQL Server 地址（Andon） |
+| SQLSERVER_PORT | 1433 | SQL Server 端口 |
+| SQLSERVER_USER |  | SQL Server 用户名 |
+| SQLSERVER_PASSWORD |  | SQL Server 密码 |
 | PORT | 5678 | 服务端口 |
 
 ## 技术栈
