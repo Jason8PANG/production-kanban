@@ -975,17 +975,21 @@ def api_hours_daily():
         today_day = date.today().day
 
         # ========== 总目标工时（从数据库 erp_data.hmlv_production_schedule 计算）==========
+        # ★ 仅统计ship_date在当前月份的工单，使用 qty × cycle_time_h
         df_erp = get_erp_schedule()
+        now_month_daily = date.today().strftime('%Y-%m')
+        df_this_month_daily = df_erp[df_erp['_month'] == now_month_daily]
 
-        def calc_total_hours_from_db(df_erp):
-            """使用数据库 work_hours_h 字段计算总工时"""
+        def calc_total_hours_from_db(df_jobs):
+            """使用数据库 qty × cycle_time_h 计算总工时（仅当月ship_date工单）"""
             total = 0.0
-            for _, row in df_erp.iterrows():
-                wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
-                total += wh
+            for _, row in df_jobs.iterrows():
+                qty = float(row['qty']) if pd.notna(row['qty']) else 0.0
+                ct = float(row['cycle_time_h']) if pd.notna(row['cycle_time_h']) else 0.0
+                total += qty * ct
             return total
 
-        total_target = round(calc_total_hours_from_db(df_erp), 2)
+        total_target = round(calc_total_hours_from_db(df_this_month_daily), 2)
 
         # ========== 工作日判断 ==========
         HOLIDAYS_2026 = {
@@ -1029,18 +1033,18 @@ def api_hours_daily():
         rows = cursor.fetchall()
         conn.close()
 
-        # 构建 Job→work_hours_h 映射（使用数据库 work_hours_h 字段）
-        job_hours_map_daily = {}  # job -> work_hours_h
-        df_erp = get_erp_schedule()
-        for _, r in df_erp.iterrows():
+        # 构建 Job→qty/cycle_time_h 映射（使用 qty × cycle_time_h，仅当月ship_date工单）
+        job_hours_map_daily = {}  # job -> (qty, cycle_time_h)
+        for _, r in df_this_month_daily.iterrows():
             j = str(r['job']).strip()
-            wh = float(r['work_hours_h']) if pd.notna(r['work_hours_h']) else 0.0
+            qty = float(r['qty']) if pd.notna(r['qty']) else 0.0
+            ct = float(r['cycle_time_h']) if pd.notna(r['cycle_time_h']) else 0.0
             if j and j not in job_hours_map_daily:
-                job_hours_map_daily[j] = wh
+                job_hours_map_daily[j] = (qty, ct)
 
         # 按日期汇总完成工时
         # 策略：每条工序记录都代表该工单完成了某道工序，计入当日完成工时
-        # 工时 = work_hours_h（数据库工单总工时）
+        # 工时 = qty × cycle_time_h（单根时间 × 工单数），不去重
         daily_completed = {}  # date_str -> hours
         for row in rows:
             job = str(row[0]).strip()
@@ -1049,7 +1053,8 @@ def api_hours_daily():
                 continue
             day_str = cd.strftime('%Y-%m-%d')
 
-            hours = job_hours_map_daily.get(job, 0)
+            pair = job_hours_map_daily.get(job, (0, 0))
+            hours = pair[0] * pair[1]
             if hours == 0:
                 continue
 

@@ -515,6 +515,10 @@ function loadExcelJobs() {
         renderExcelCards(json.data);
         renderSalesCards(json.data);
         renderAsmHoursDisplay(json.data);
+        // 销售/工时数据就绪后，重新渲染工序表（修复异步竞态导致销售为0的问题）
+        if (_apiJson) {
+          renderAll(_apiJson);
+        }
       }
     })
     .catch(e => {
