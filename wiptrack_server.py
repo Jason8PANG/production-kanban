@@ -131,8 +131,9 @@ def get_erp_schedule():
     conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT job, item, qty, ship_date, line, work_hours_h, 
-               unit_price, sales_amount, job_status, tested_qty, wo_total
+        SELECT job, item, qty, ship_date, line, work_hours_h,
+               unit_price, sales_amount, job_status, tested_qty, wo_total,
+               cycle_time_h
         FROM erp_data.hmlv_production_schedule
     """)
     columns = [col[0] for col in cursor.description]
@@ -154,6 +155,7 @@ def get_erp_schedule():
     df['sales_amount'] = pd.to_numeric(df['sales_amount'], errors='coerce').fillna(0)
     df['unit_price'] = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
     df['work_hours_h'] = pd.to_numeric(df['work_hours_h'], errors='coerce').fillna(0)
+    df['cycle_time_h'] = pd.to_numeric(df['cycle_time_h'], errors='coerce').fillna(0)
     df['_dt'] = pd.to_datetime(df['ship_date'], errors='coerce')
     df['_month'] = df['_dt'].dt.to_period('M').astype(str)
     return df
@@ -461,17 +463,17 @@ def api_excel_jobs():
 
         # ========== 工单→Item/工单数/工时映射（从数据库erp_data表）==========
         job_item_released = {}
-        job_hours_map = {}  # job -> work_hours_h
+        job_cycle_map = {}  # job -> cycle_time_h（单根时间）
         for _, row in df_all.iterrows():
             j = str(row['job']).strip()
             item = str(row['item']).strip() if pd.notna(row['item']) else ''
             # 使用 qty 字段作为工单数
             released = int(row['qty']) if pd.notna(row['qty']) else 0
-            # 使用 work_hours_h 字段作为工单总工时
-            wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
+            # 使用 cycle_time_h 字段作为单根时间
+            ct = float(row['cycle_time_h']) if pd.notna(row['cycle_time_h']) else 0.0
             if j and j not in job_item_released:
                 job_item_released[j] = (item, released)
-                job_hours_map[j] = wh
+                job_cycle_map[j] = ct
 
         # ========== 当前月份工单集合（用于各模块引用）==========
         df_this_month = df_all[df_all['_month'] == now_month]
@@ -517,9 +519,11 @@ def api_excel_jobs():
         }
 
         # ========== 各工序已消耗工时 & 总工时 ==========
+        # 逻辑：工序工时 = SUM(当月完成该工序的每条记录.qty × cycle_time_h)
+        # 不去重，每条生产记录都独立累加工时
         station_hours = {}
         for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
-            hours = 0
+            hours = 0.0
             for r in records:
                 station_raw = str(r.get(station_col, '') or '').strip()
                 station_en = STATION_CN_TO_KEY.get(station_raw, '')
@@ -527,12 +531,15 @@ def api_excel_jobs():
                 if station_en == st and dv.startswith(now_month):
                     job = str(r.get(job_col, '') or '').strip()
                     if job:
-                        # 使用数据库 work_hours_h 字段
-                        hours += job_hours_map.get(job, 0)
+                        qty = float(job_item_released.get(job, ('', 0))[1])
+                        ct = job_cycle_map.get(job, 0)
+                        hours += qty * ct
             station_hours[st] = round(hours, 2)
         result['station_hours'] = station_hours
 
         # ========== 每个工序当天完成的工时 ==========
+        # 逻辑：当天完成该工序的每条记录.qty × cycle_time_h
+        # 不去重，每条生产记录都独立累加工时
         today_str_db = date.today().strftime('%Y-%m-%d')
         station_hours_today = {}
         for r in records:
@@ -545,9 +552,9 @@ def api_excel_jobs():
                 station_hours_today[station_en] = 0
             job = str(r.get(job_col, '') or '').strip()
             if job:
-                # 使用数据库 work_hours_h 字段
-                station_hours_today[station_en] += job_hours_map.get(job, 0)
-        # 确保所有工序都有值
+                qty = float(job_item_released.get(job, ('', 0))[1])
+                ct = job_cycle_map.get(job, 0)
+                station_hours_today[station_en] += qty * ct
         for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
             station_hours_today[st] = round(station_hours_today.get(st, 0), 2)
         result['station_hours_today'] = station_hours_today
@@ -571,13 +578,14 @@ def api_excel_jobs():
         }
 
         # ========== 组装工时（仅当月ship_date的工单）==========
+        # 逻辑：工单数 × 单根时间（cycle_time_h）
         def calc_asm_hours(df_jobs):
             total_hours, job_count = 0, 0
             for _, row in df_jobs.iterrows():
                 job = str(row['job']).strip()
-                # 使用数据库 work_hours_h 字段
-                wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
-                total_hours += wh
+                ct = float(row['cycle_time_h']) if pd.notna(row['cycle_time_h']) else 0.0
+                qty = int(row['qty']) if pd.notna(row['qty']) else 0
+                total_hours += qty * ct
                 job_count += 1
             return round(total_hours, 2), job_count
 
