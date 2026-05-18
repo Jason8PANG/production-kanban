@@ -11,126 +11,96 @@ HMLV生产实时看板系统，用于 310 站点 WIP 后台数据管理和生产
 - 🔍 **工单查询**: 支持模糊搜索工单号，查看工序流转明细
 - 💰 **销售统计**: 按工序、按月统计销售金额
 
-### 快速部署
+## 数据源说明
 
-#### 前置条件
+| 数据源 | 数据库类型 | ODBC DSN | 说明 |
+|--------|-----------|----------|------|
+| **wiptrack** | MySQL | wiptrack | 生产记录（production_records）和排产计划（hmlv_production_schedule） |
+| **Andon** | MS SQL Server | andon_mssql | Andon 系统数据（生产异常、设备状态等） |
+
+## 快速部署
+
+### 前置条件
 
 - Docker & Docker Compose
-- SQL Server 数据库网络可达
-- Linux 服务器需配置 ODBC 驱动
+- **MySQL** 数据库网络可达
+- **MS SQL Server** 数据库网络可达
+- Linux 服务器需配置 MySQL ODBC 和 SQL Server ODBC 驱动
 
-#### 1. 克隆代码
-
-```bash
-git clone https://github.com/Jason8PANG/production-kanban.git
-cd production-kanban
-```
-
-#### 2. 配置 ODBC 数据源 (Linux)
-
-在 Linux 服务器上安装 `unixodbc` 和 SQL Server 驱动：
-
-```bash
-sudo apt update
-sudo apt install -y unixodbc unixodbc-dev odbcinst1debian2 msodbcsql18
-```
-
-配置 ODBC 数据源 `wiptrack`，编辑 `/etc/odbc.ini`：
-
-```ini
-[wiptrack]
-Driver      = ODBC Driver 18 for SQL Server
-Server      = 你的数据库服务器IP,1433
-Database    = 你的数据库名
-Uid         = powerbi
-PWD         = !Q1234567
-Encrypt     = no
-TrustServerCertificate = yes
-```
-
-> **提示**: 数据库服务器 IP 和数据库名需要根据实际情况修改。如果数据库也在 Docker 网络中，可以使用容器名或主机名。
-
-#### 3. 创建 Docker 网络
-
-```bash
-docker network create public-net
-```
-
-#### 4. 启动服务
-
-```bash
-docker compose up -d --build
-```
-
-#### 5. 查看日志
-
-```bash
-docker compose logs -f hmlv-kanban
-
-### 安装步骤
-
-#### 1. 克隆代码
+### 1. 克隆代码
 
 ```bash
 git clone https://github.com/Jason8PANG/production-kanban.git
 cd production-kanban
 ```
 
-#### 2. 配置 ODBC 数据源（Linux）
+### 2. 配置 ODBC 数据源 (Linux)
 
-在 Linux 服务器上安装 `unixodbc` 和 SQL Server 驱动：
+在 Linux 服务器上安装 ODBC 驱动：
 
 ```bash
-# Ubuntu/Debian
 sudo apt update
 sudo apt install -y unixodbc unixodbc-dev odbcinst1debian2
-
-# 安装 SQL Server ODBC 驱动
+# MySQL/MariaDB ODBC 驱动
+sudo apt install -y odbc-mariadb
+# MS SQL Server ODBC 驱动
 curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
 curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
 sudo apt update
 sudo ACCEPT_EULA=Y apt install -y msodbcsql18
 ```
 
-配置 ODBC 数据源 `wiptrack`，编辑 `/etc/odbc.ini`：
+配置 ODBC 数据源，编辑 `/etc/odbc.ini`：
 
 ```ini
 [wiptrack]
-Driver      = ODBC Driver 18 for SQL Server
-Server      = 你的数据库服务器IP,1433
+Driver      = MariaDB Connector/ODBC 3.1
+Server      = 你的MySQL服务器IP
+Port        = 3306
 Database    = 你的数据库名
 Uid         = powerbi
 PWD         = !Q1234567
+
+[andon_mssql]
+Driver      = ODBC Driver 18 for SQL Server
+Server      = 你的SQLServer服务器IP,1433
+Database    = 你的Andon数据库名
+Uid         = 你的用户名
+PWD         = 你的密码
 Encrypt     = no
 TrustServerCertificate = yes
 ```
 
-#### 3. 启动服务
+> **提示**:
+> - `wiptrack` 数据源指向 **MySQL**（存放生产记录和排产计划）
+> - `andon_mssql` 数据源指向 **MS SQL Server**（存放 Andon 数据）
+> - 数据库服务器 IP、端口和数据库名需要根据实际情况修改
+
+### 3. 创建 Docker 网络
+
+```bash
+docker network create public-net
+```
+
+### 4. 启动服务
 
 ```bash
 docker compose up -d --build
 ```
 
-#### 4. 查看日志
+### 5. 查看日志
 
 ```bash
 docker compose logs -f hmlv-kanban
 ```
 
-
-### 启动服务
-
-```bash
-docker compose up -d --build
-```
-
 ### 访问服务
 
-- 看板页面: http://localhost:8081
-- 数据接口: http://localhost:8081/api/data
-- 销售工时接口: http://localhost:8081/api/excel_jobs
-- WIP 滞留接口: http://localhost:8081/api/wip
-- 工单查询接口: http://localhost:8081/api/search_wo?q=xxx
+- 看板页面: http://服务器IP:8081
+- 数据接口: http://服务器IP:8081/api/data
+- 销售工时接口: http://服务器IP:8081/api/excel_jobs
+- WIP 滞留接口: http://服务器IP:8081/api/wip
+- 工单查询接口: http://服务器IP:8081/api/search_wo?q=xxx
 
 ## 环境变量
 
@@ -145,7 +115,7 @@ docker compose up -d --build
 
 - **后端**: Python 3.11 + Flask + pyodbc
 - **数据处理**: pandas + openpyxl
-- **数据库**: SQL Server (ODBC)
+- **数据库**: MySQL (wiptrack) + MS SQL Server (Andon)
 - **前端**: 纯静态 HTML/CSS/JS
 
 ## 目录结构
