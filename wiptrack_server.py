@@ -403,14 +403,6 @@ def api_excel_jobs():
         import pandas as pd
         from datetime import date
 
-        # ========== 组装工序单根时间（从 Excel 读取）==========
-        path_asm = 'I:/Production/01 Cor&Fiber Production/14-手工排产/AI排产文件夹/组装工序单根生产时间.xlsx'
-        df_asm = pd.read_excel(path_asm)
-        asm_cols = df_asm.columns.tolist()
-        df_asm = df_asm[[asm_cols[0], asm_cols[1]]].dropna()
-        df_asm.columns = ['PN', 'AsmTime']
-        asm_time_map = dict(zip(df_asm['PN'].astype(str).str.strip(), df_asm['AsmTime'].astype(float)))
-
         # ========== 从数据库读取生产排程数据 ==========
         df_all = get_erp_schedule()
         now_month = date.today().strftime('%Y-%m')
@@ -469,15 +461,17 @@ def api_excel_jobs():
             job_key = str(row['job']).strip()
             job_sales_map[job_key] = float(row['sales_amount'])
 
-        # ========== 工单→Item/工单数映射（从数据库erp_data表）==========
+        # ========== 工单→Item/工单数/工时映射（全部从数据库erp_data表）==========
         job_item_released = {}
+        job_hours_map = {}  # job -> work_hours_h
         for _, row in df_all.iterrows():
             j = str(row['job']).strip()
             item = str(row['item']).strip() if pd.notna(row['item']) else ''
-            # 使用 qty 字段作为工单数
             released = int(row['qty']) if pd.notna(row['qty']) else 0
+            wh = float(row['work_hours_h']) if pd.notna(row['work_hours_h']) else 0.0
             if j and j not in job_item_released:
                 job_item_released[j] = (item, released)
+                job_hours_map[j] = wh
 
         # ========== 当前月份工单集合（用于各模块引用）==========
         df_this_month = df_all[df_all['_month'] == now_month]

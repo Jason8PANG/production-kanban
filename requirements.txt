@@ -2,4 +2,3 @@ flask
 flask-cors
 pymysql
 pandas
-openpyxl
