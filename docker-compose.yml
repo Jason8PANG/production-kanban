@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  hmlv-kanban:
+    build: .
+    container_name: hmlv-kanban
+    restart: unless-stopped
+    ports:
+      - "8081:5678"
+    networks:
+      - public-net
+    environment:
+      - ODBC_DSN=wiptrack
+      - ODBC_UID=powerbi
+      - ODBC_PWD='!Q1234567'
+    volumes:
+      - ./wiptrack_server.py:/app/wiptrack_server.py:ro
+      - ./HMLV生产看板.html:/app/HMLV生产看板.html:ro
+      - /etc/localtime:/etc/localtime:ro
+
+networks:
+  public-net:
+    external: true

@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HMLV 生产看板</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+  background: #0b1120;
+  color: #e2e8f0;
+  height: 100vh;
+  overflow: hidden;
+}
+.header {
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.2);
+  padding: 2px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 40px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  position: relative;
+  z-index: 10;
+}
+.header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.4), transparent);
+}
+.header h1 {
+  font-size: 20px;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 3px;
+  font-weight: 700;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.refresh-info {
+  font-size: 11px;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.refresh-info span { color: #38bdf8; }
+.btn {
+  background: linear-gradient(135deg, #1e293b, #334155);
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+.btn:hover { background: #475569; border-color: #64748b; }
+.btn-primary {
+  background: linear-gradient(135deg, #0284c7, #0ea5e9);
+  border-color: #0284c7;
+}
+.btn-primary:hover { background: linear-gradient(135deg, #0369a1, #0284c7); }
+select {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+select:hover { border-color: #64748b; }
+.refresh-status {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  margin-right: 3px;
+  animation: pulse 2s infinite;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
+  50% { opacity: 0.4; box-shadow: 0 0 2px rgba(74, 222, 128, 0.2); }
+}
+.main {
+  padding: 6px 10px;
+  height: calc(100vh - 40px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Sections */
+.section {
+  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.section-header {
+  background: rgba(15, 23, 42, 0.8);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #38bdf8;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 28px;
+}
+.section-body { padding: 6px 10px; }
+
+/* Station Table */
+.station-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.station-table th {
+  text-align: left;
+  padding: 7px 9px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+  text-transform: uppercase;
+}
+.station-table td {
+  padding: 8px 9px;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.6);
+  vertical-align: middle;
+}
+.station-table tr:last-child td { border-bottom: none; }
+.station-table tr:hover td { background: rgba(15, 23, 42, 0.5); }
+.station-table tr:hover td.divider-cell { background: transparent; }
+
+/* Divider columns */
+.col-divider { width: 2px; padding: 0; }
+.divider-col { width: 2px; }
+.divider-cell {
+  padding: 0 !important;
+  width: 1px;
+  min-width: 1px;
+  border-left: 1px solid rgba(71, 85, 105, 0.5);
+  border-right: none;
+  background: transparent !important;
+}
+thead th.divider-cell {
+  border-left: 1px solid rgba(100, 116, 139, 0.4);
+  padding: 0;
+}
+thead th.divider-cell.has-line {
+  border-bottom: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+/* Progress Bar */
+.progress-bar-wrap {
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 5px;
+  height: 18px;
+  overflow: hidden;
+  width: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(51, 65, 85, 0.3);
+}
+.progress-bar {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.6s ease;
+  position: relative;
+}
+.progress-bar-text {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  z-index: 1;
+}
+.progress-bar-text-left {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  z-index: 1;
+}
+.rate-text {
+  font-weight: 700;
+  font-size: 12px;
+  text-align: right;
+  min-width: 40px;
+}
+
+canvas { display: block; background: transparent; }
+
+.dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  box-shadow: 0 0 6px currentColor;
+  opacity: 0.9;
+}
+
+/* WIP Cards */
+.wip-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 8px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: border-color 0.2s;
+}
+.wip-card:hover { border-color: rgba(71, 85, 105, 0.8); }
+.wip-card-header {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+  color: #e2e8f0;
+}
+.wip-card-body {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 11px;
+}
+.wip-card-body::-webkit-scrollbar { width: 3px; }
+.wip-card-body::-webkit-scrollbar-track { background: transparent; }
+.wip-card-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+.wip-table-header {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  gap: 4px;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.wip-table-header .wip-col-job,
+.wip-row .wip-col-job { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
+.wip-table-header .wip-col-item,
+.wip-row .wip-col-item { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
+.wip-table-header .wip-col-line,
+.wip-row .wip-col-line { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
+.wip-col-line { color: #a78bfa; font-size: 8px; white-space: nowrap; flex: 1 1 0; min-width: 28px; text-align: center; }
+.wip-row {
+  display: flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.4);
+  gap: 4px;
+  transition: background 0.15s;
+  font-size: 9px;
+  min-height: 22px;
+}
+.wip-row:hover { background: rgba(30, 41, 59, 0.6); }
+.wip-row:last-child { border-bottom: none; }
+.wip-col-job { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 3 1 0; min-width: 60px; max-width: 120px; text-align: center; font-size: 10px; }
+.wip-col-item { color: #94a3b8; flex: 2 1 0; min-width: 40px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 10px; }
+.wip-dwell { font-weight: 600; white-space: nowrap; flex: 0 0 auto; min-width: 50px; text-align: center; font-size: 10px; }
+.wip-dwell.warn { color: #f87171; }
+.wip-dwell.ok { color: #4ade80; }
+.wip-dwell.mid { color: #fbbf24; }
+
+/* KPI Card Glow */
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+}
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  opacity: 0.3;
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+
+<div class="header">
+  <h1>HMLV生产看板 <span id="todayDateLabel" style="font-weight:400;font-size:16px;color:#94a3b8;margin-left:8px;"></span></h1>
+  <div class="header-right">
+    <div class="refresh-info">
+      <span class="refresh-status" id="refreshDot"></span>
+      自动刷新: <span id="countdownText">30s</span>
+      &nbsp;|&nbsp;
+      当前时间: <span id="updated_at">--:--:--</span>
+      &nbsp;|&nbsp;
+      共 <span id="total_records">--</span> 条
+    </div>
+    <select id="intervalSelect">
+      <option value="30">30秒</option>
+      <option value="60">1分钟</option>
+      <option value="300" selected>5分钟</option>
+      <option value="600">10分钟</option>
+      <option value="0">手动</option>
+    </select>
+    <div style="display:flex;align-items:center;gap:4px;">
+      <input id="woSearchInput" type="text" placeholder="搜工单号..." autocomplete="off"
+        style="background:rgba(15,23,42,0.8);color:#e2e8f0;border:1px solid #475569;padding:4px 10px;border-radius:6px;font-size:11px;width:130px;outline:none;transition:border-color 0.2s;"
+        onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#475569'"
+        onkeydown="if(event.key==='Enter')searchWO()">
+      <button class="btn" onclick="searchWO()" style="padding:2px 8px;font-size:10px;">🔍</button>
+    </div>
+    <button class="btn btn-primary" onclick="manualRefresh()">刷新</button>
+  </div>
+</div>
+
+<!-- 工单查询弹窗 -->
+<div id="woModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;width:560px;max-width:92vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.5);">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #334155;background:#0f172a;border-radius:8px 8px 0 0;">
+      <span style="color:#38bdf8;font-size:14px;font-weight:700;">工单状态查询</span>
+      <button onclick="closeWOModal()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
+    </div>
+    <div id="woModalBody" style="padding:16px;"></div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- Station Progress -->
+  <div class="section">
+    <div class="section-header">
+      <span style="min-width:60px"></span>
+      <span style="font-size:17px;font-weight:700">工序完成进度</span>
+      <span style="min-width:60px"></span>
+    </div>
+    <div class="section-body" style="padding:8px 8px;">
+      <table class="station-table" id="stationTable">
+          <colgroup>
+            <col style="width:8%">
+            <col class="divider-col">
+            <col style="width:14%">
+            <col style="width:11%">
+            <col class="divider-col">
+            <col style="width:14%">
+            <col style="width:11%">
+            <col class="divider-col">
+            <col style="width:5%">
+            <col style="width:7%">
+            <col style="width:18%">
+          </colgroup>
+        <thead>
+          <tr>
+            <th style="border-bottom:none;"></th>
+            <th class="divider-cell" style="border-bottom:none;"></th>
+            <th colspan="2" style="padding:8px 0 6px;text-transform:none;letter-spacing:0;font-size:11px;border-bottom:none;text-align:center;">
+              <span style="color:#94a3b8;font-size:13px;font-weight:700;letter-spacing:1px;">当月释放工单销售</span><br>
+              <span style="color:#22d3ee;font-size:19px;font-weight:700;" id="totalSalesDisplay">-</span>
+            </th>
+            <th class="divider-cell" style="border-bottom:none;"></th>
+            <th colspan="2" style="padding:8px 0 6px;text-transform:none;letter-spacing:0;font-size:11px;border-bottom:none;text-align:center;">
+              <span style="color:#94a3b8;font-size:13px;font-weight:700;letter-spacing:1px;">当月已释放工单数量</span><br>
+              <span style="color:#38bdf8;font-size:19px;font-weight:700;" id="totalJobsDisplay">-</span>
+            </th>
+            <th class="divider-cell" style="border-bottom:none;"></th>
+            <th colspan="3" style="padding:8px 0 6px;text-transform:none;letter-spacing:0;font-size:11px;border-bottom:none;text-align:center;">
+              <span style="color:#94a3b8;font-size:13px;font-weight:700;letter-spacing:1px;">已释放工单总工时</span><br>
+              <span style="color:#fb923c;font-size:19px;font-weight:700;" id="totalAsmHoursDisplay">-</span>
+            </th>
+          </tr>
+          <tr>
+            <th colspan="11" style="padding:0;border-bottom:none;"><div style="height:1px;background:linear-gradient(90deg,transparent,rgba(56,189,248,0.25),transparent);"></div></th>
+          </tr>
+          <tr>
+            <th>工序</th>
+            <th class="divider-cell has-line"></th>
+            <th>销售金额</th>
+            <th>销售完成率</th>
+            <th class="divider-cell has-line"></th>
+            <th>累计完成工单</th>
+            <th>工单进度</th>
+            <th class="divider-cell has-line"></th>
+            <th>今日完成工时</th>
+            <th>累计完成工时</th>
+            <th>工时进度</th>
+          </tr>
+        </thead>
+        <tbody id="stationBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Station WIP -->
+  <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+    <div class="section-header">
+      <span style="min-width:60px"></span>
+      <span style="font-size:17px;font-weight:700">工序WIP</span>
+      <span style="min-width:60px"></span>
+    </div>
+    <div class="section-body" style="padding:4px 8px;flex:1;min-height:0;display:flex;flex-direction:column;">
+      <div id="wipContainer" style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;flex:1;min-height:0;"></div>
+    </div>
+  </div>
+
+</div>
+
+
+<script>
+const STATION_COLORS = {
+  Print:'#38bdf8', Cut:'#4ade80', Pre:'#facc15',
+  Asm:'#fb923c', Bundle:'#c084fc', Test:'#f87171', Pack:'#2dd4bf'
+};
+const STATION_CN = {
+  Print:'工单打印', Cut:'剪线', Pre:'预处理',
+  Asm:'组装', Bundle:'Bundle', Test:'测试', Pack:'包装'
+};
+const STATION_LIST = ['Print','Cut','Pre','Asm','Bundle','Test','Pack'];
+const DISPLAY_STATIONS = ['Cut','Pre','Asm','Test','Pack'];
+
+let totalJobCount = 1;
+
+// ========== Auto Refresh ==========
+let autoTimer = null;
+let refreshInterval = 30;
+let countdown = 30;
+let countdownTimer = null;
+
+function loadData() {
+  fetch('/api/data?t=' + Date.now())
+    .then(r => r.json())
+    .then(json => {
+      renderAll(json);
+    })
+    .catch(e => {
+      document.querySelector('.main').innerHTML = '<div style="background:#7f1d1d;border:1px solid #b91c1c;border-radius:8px;padding:20px;margin:20px;color:#fca5a5">加载失败: ' + e.message + '</div>';
+    });
+}
+
+function loadExcelJobs() {
+  fetch('/api/excel_jobs?t=' + Date.now())
+    .then(r => r.json())
+    .then(json => {
+      if (json.success) {
+        if (json.data && json.data.current_month) {
+          totalJobCount = json.data.current_month.total || 1;
+        }
+        // 保存销售数据供其他函数使用
+        if (json.data && json.data.sales) {
+          window._totalSales = json.data.sales.total_sales || 0;
+          window._salesData = json.data.sales;
+        }
+        // 保存各工序销售
+        if (json.data && json.data.station_sales) {
+          window._stationSales = json.data.station_sales;
+        }
+        // 保存各工序工时 & 总工时
+        if (json.data && json.data.station_hours) {
+          window._stationHours = json.data.station_hours;
+          window._totalHoursAll = json.data.total_hours_all || 0;
+        }
+        // 保存实时工时目标
+        if (json.data && json.data.realtime_target_hours) {
+          window._realtimeTargetHours = json.data.realtime_target_hours;
+          window._dailyTargetHours = json.data.daily_target_hours;
+          window._passedWorkDays = json.data.passed_workdays || 1;
+        }
+        // 保存各工序每日目标工时
+        if (json.data && json.data.station_daily_target) {
+          window._stationDailyTarget = json.data.station_daily_target;
+        }
+        // 保存各工序当日完成工时
+        if (json.data && json.data.station_hours_today) {
+          window._stationHoursToday = json.data.station_hours_today;
+        }
+        // 保存当月工作日数
+        if (json.data && json.data.workdays_in_month) {
+          window._workdaysInMonth = json.data.workdays_in_month;
+        }
+        renderExcelCards(json.data);
+        renderSalesCards(json.data);
+        renderAsmHoursDisplay(json.data);
+      }
+    })
+    .catch(e => {
+      console.error('Excel数据加载失败:', e);
+    });
+}
+
+function renderExcelCards(data) {
+  const today = new Date();
+  const y = today.getFullYear();
+  const mo = String(today.getMonth() + 1).padStart(2, '0');
+  const d = String(today.getDate()).padStart(2, '0');
+  document.getElementById('todayDateLabel').textContent = y + '-' + mo + '-' + d;
+
+  if (!data || !data.current_month) {
+    return;
+  }
+
+  const c = data.current_month;
+  const total = c.total;
+
+  // 显示总工单数
+  document.getElementById('totalJobsDisplay').textContent = total;
+}
+
+function renderSalesCards(data) {
+  if (!data || !data.sales) {
+    return;
+  }
+
+  const s = data.sales;
+  const totalSales = s.total_sales || 0;
+
+  // 显示总销售额
+  const fmt = (n) => '$' + Math.round(n).toLocaleString('en-US');
+  document.getElementById('totalSalesDisplay').textContent = fmt(totalSales);
+}
+
+// 组装工时卡片
+function renderAsmHoursDisplay(data) {
+  const asmDisplay = document.getElementById('totalAsmHoursDisplay');
+  if (!data || !data.asm_hours) {
+    if (asmDisplay) asmDisplay.textContent = '暂无数据';
+    return;
+  }
+  const totalHours = data.asm_hours.total_hours || 0;
+  if (asmDisplay) asmDisplay.textContent = totalHours.toFixed(2) + ' H';
+}
+
+function manualRefresh() {
+  loadData();
+  loadExcelJobs();
+  loadWIP();
+}
+
+function resetCountdown() {
+  countdown = refreshInterval;
+  document.getElementById('countdownText').textContent = refreshInterval > 0 ? countdown + 's' : '--';
+}
+
+function startAutoRefresh(sec) {
+  refreshInterval = sec;
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+
+  const dot = document.getElementById('refreshDot');
+  if (sec > 0) {
+    dot.style.background = '#4ade80';
+    autoTimer = setInterval(function(){ loadData(); loadExcelJobs(); loadWIP(); }, sec * 1000);
+    countdown = sec;
+    countdownTimer = setInterval(() => {
+      countdown--;
+      if (countdown < 0) countdown = sec;
+      document.getElementById('countdownText').textContent = countdown + 's';
+    }, 1000);
+  } else {
+    dot.style.background = '#64748b';
+    dot.style.animation = 'none';
+    document.getElementById('countdownText').textContent = '--';
+  }
+}
+
+document.getElementById('intervalSelect').addEventListener('change', e => {
+  startAutoRefresh(parseInt(e.target.value));
+});
+
+// ========== Render ==========
+let _apiJson = null;
+
+function renderAll(json) {
+  _apiJson = json;
+
+  document.getElementById('updated_at').textContent = json.updated_at || '--';
+  document.getElementById('total_records').textContent = (json.kpi && json.kpi.total_records) || json.total_records || 0;
+
+  // 工序完成进度 将 API 返回的扁平结构重新整理为前端期望的 stats 格式
+  const stationStats = json.station_stats || [];
+
+  // 构造 all.job_by_station：从 station_stats 数组里读完成数（当月数据）
+  const jobByStation = {};
+  stationStats.forEach(s => { 
+    jobByStation[s.station] = s.done; 
+  });
+
+  const stats = {
+    updated_at: json.updated_at,
+    all: { job_by_station: jobByStation, by_station: jobByStation }
+  };
+
+  renderStationTable(stats);
+}
+
+function renderStationTable(stats) {
+  const tbody = document.getElementById('stationBody');
+  tbody.innerHTML = '';
+  const totalJobs = totalJobCount || 1;
+
+  // 从 all.by_station 获取当月完成数
+  const byStation = stats.all?.by_station || {};
+  
+  // 调试：打印数据
+  console.log('[DEBUG] byStation:', byStation);
+  console.log('[DEBUG] totalJobs:', totalJobs);
+
+  const salesData = window._salesData || {};
+  const totalSales = salesData.total_sales || 0;
+  const stationHours = window._stationHours || {};
+  const stationHoursToday = window._stationHoursToday || {};
+  const totalHoursAll = window._totalHoursAll || 1;  // 月度总目标工时
+  const workdaysInMonth = window._workdaysInMonth || 20;
+  const passedWorkDays = window._passedWorkDays || 1;
+  
+  DISPLAY_STATIONS.forEach(st => {
+    const all = byStation[st] || 0;
+    const pct = totalJobs > 0 ? Math.round((all / totalJobs) * 100) : 0;
+    const color = STATION_COLORS[st] || '#94a3b8';
+
+    // 工时计算
+    const todayHours = stationHoursToday[st] || 0;
+    const cumHours = stationHours[st] || 0;
+    // 每日目标 = 月度总目标 / 当月工作日数
+    const dailyTarget = totalHoursAll / workdaysInMonth;
+    // 累计目标 = 每日目标 × 已过工作日数（旧逻辑）
+    const cumTarget = dailyTarget * passedWorkDays;
+    // 完成率 = 累计完成工时 / 月度总目标工时
+    const hoursRate = totalHoursAll > 0 ? Math.round((cumHours / totalHoursAll) * 100) : 0;
+    // 目标率 = 累计目标 / 月度总目标工时
+    const targetRate = totalHoursAll > 0 ? Math.round((cumTarget / totalHoursAll) * 100) : 0;
+    // 进度条宽度
+    const actualBarWidth = Math.min(hoursRate, 100);
+    const targetBarWidth = Math.min(targetRate, 100);
+    // 工时进度条颜色：实际≥目标→绿色，否则按当前进度给红/黄
+    let hoursBarColor;
+    if (hoursRate >= targetRate) {
+      hoursBarColor = '#4ade80';
+    } else if (hoursRate < 50) {
+      hoursBarColor = '#f87171';
+    } else {
+      hoursBarColor = '#fbbf24';
+    }
+    // 目标进度条颜色（蓝色系）
+    const targetBarColor = '#38bdf8';
+
+    // 销售
+    const stationSales = window._stationSales || {};
+    const salesVal = stationSales[st] || 0;
+    const stationSalesRate = totalSales > 0 ? Math.round((salesVal / totalSales) * 100) : 0;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><span class="dot" style="background:' + color + '"></span><strong>' + (STATION_CN[st] || st) + '</strong></td>' +
+      '<td class="divider-cell"></td>' +
+      '<td style="color:#a78bfa;font-weight:600">' + (salesVal > 0 ? '$' + salesVal.toLocaleString('en-US', {minimumFractionDigits: 2}) : '-') + '</td>' +
+      '<td><div class="progress-bar-wrap"><div class="progress-bar" style="width:' + stationSalesRate + '%;background:' + color + '"></div><span class="progress-bar-text" style="color:' + color + '">' + stationSalesRate + '%</span></div></td>' +
+      '<td class="divider-cell"></td>' +
+      '<td><strong>' + all + '</strong></td>' +
+      '<td><div class="progress-bar-wrap"><div class="progress-bar" style="width:' + pct + '%;background:' + color + '"></div><span class="progress-bar-text" style="color:' + color + '">' + pct + '%</span></div></td>' +
+      '<td class="divider-cell"></td>' +
+      '<td style="color:#fbbf24;font-weight:600;font-size:13px;">' + todayHours.toFixed(1) + '</td>' +
+      '<td style="color:#fbbf24;font-weight:600;font-size:13px;">' + cumHours.toFixed(1) + '</td>' +
+      '<td style="display:flex;align-items:center;gap:4px;">' +
+        '<span style="font-size:12px;font-weight:600;color:' + hoursBarColor + ';min-width:32px;text-align:right;">' + hoursRate + '%</span>' +
+        '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;">' +
+          '<div class="progress-bar" style="width:' + actualBarWidth + '%;background:' + hoursBarColor + ';"></div>' +
+          (targetRate > 0 && targetRate < 100 ? '<div style="position:absolute;left:' + targetBarWidth + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + targetBarWidth + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + targetRate + '%</span>' : '') +
+        '</div>' +
+      '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+
+
+
+// ========== WIP ==========
+function loadWIP() {
+  fetch('/api/wip?t=' + Date.now())
+    .then(r => r.json())
+    .then(json => {
+      if (json.success) renderWIP(json.data);
+    })
+    .catch(e => console.error('WIP数据加载失败:', e));
+}
+
+function renderWIP(data) {
+  const container = document.getElementById('wipContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const displayStations = ['Cut','Pre','Asm','Test','Pack'];
+  displayStations.forEach(st => {
+    const stData = data[st];
+    if (!stData) {
+      // 如果该工序没有数据，创建一个空卡片
+      const card = document.createElement('div');
+      card.className = 'wip-card';
+      card.style.borderTop = '3px solid ' + (STATION_COLORS[st] || '#94a3b8');
+      card.innerHTML = `
+        <div class="wip-card-header" style="background:${STATION_COLORS[st] || '#94a3b8'}15;color:${STATION_COLORS[st] || '#94a3b8'};font-weight:600;">
+          <span>${STATION_CN[st] || st}</span>
+          <span style="background:${STATION_COLORS[st] || '#94a3b8'}30;color:${STATION_COLORS[st] || '#94a3b8'};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">0</span>
+        </div>
+        <div class="wip-card-body" style="display:flex;align-items:center;justify-content:center;color:#475569;font-size:11px;padding:20px;text-align:center;">
+          暂无数据
+        </div>
+      `;
+      container.appendChild(card);
+      return;
+    }
+    const color = STATION_COLORS[st] || '#94a3b8';
+    const jobs = stData.jobs || [];  // 从 stData 获取 jobs 数组
+    const count = stData.count || 0;      // 5月滞留数
+
+    const card = document.createElement('div');
+    card.className = 'wip-card';
+    card.style.borderTop = '3px solid ' + color;
+
+    let rowsHtml = '';
+    // 异常工单置顶，其余按滞留时间降序
+    const sortedJobs = jobs.slice().sort((a, b) => {
+      const aExc = a.exception && a.exception.length > 0 ? 0 : 1;
+      const bExc = b.exception && b.exception.length > 0 ? 0 : 1;
+      return aExc - bExc;
+    });
+    sortedJobs.forEach(j => {
+      let cls = 'ok';
+      if (j.dwell_hours > 48) cls = 'warn';
+      else if (j.dwell_hours > 24) cls = 'mid';
+      const dwellStr = j.dwell_hours >= 24
+        ? (j.dwell_hours / 24).toFixed(1) + '天'
+        : j.dwell_hours.toFixed(1) + 'H';
+      const itemText = j.item || '';
+      const lineText = j.line || '';
+      const isExc = j.exception && j.exception.length > 0;
+      const isTransferred = j.transferred;
+      let excDesc = '';
+      if (isExc) {
+        excDesc = j.exception.map(function(e) { return e.station + ': ' + e.description; }).join('; ');
+      }
+      const excTitle = isExc ? ' [异常] ' + excDesc : '';
+      let rowStyle = isExc ? 'background:#451a1a;border-left:3px solid #f87171;' : '';
+      if (isTransferred) rowStyle += 'opacity:0.85;';
+      const excTag = isExc ? '<span style="color:#f87171;font-size:11px;margin-left:4px;" title="' + escHtml(excDesc) + '">\u26a0</span>' : '';
+      const transTag = isTransferred ? '<span style="color:#fbbf24;font-size:10px;margin-left:2px;" title="已流转到下游工序">\u2192</span>' : '';
+      const dwellColor = isExc ? 'color:#f87171;' : '';
+      const dwellText = isTransferred ? '已流转' : dwellStr;
+      const tooltip = (escHtml(j.job) || '无') + '\nItem: ' + (itemText || '无') + '\nLine: ' + (lineText || '无') + '\n完成时间: ' + escHtml(j.complete_time) + escHtml(excTitle);
+      rowsHtml += '<div class="wip-row" style="' + rowStyle + '" title="' + tooltip + '"><span class="wip-col-job">' + escHtml(j.job) + excTag + transTag + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(lineText) + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
+    });
+
+    card.innerHTML = `
+      <div class="wip-card-header" style="background:${color}15;color:${color};font-weight:600;">
+        <span>${STATION_CN[st] || st}</span>
+        <span style="background:${color}30;color:${color};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">${count}</span>
+      </div>
+      <div class="wip-card-body">
+        <div class="wip-table-header">
+          <span class="wip-col-job">JOB</span>
+          <span class="wip-col-item">Item</span>
+          <span class="wip-col-line">Line</span>
+          <span class="wip-dwell">滞留时间</span>
+        </div>
+        ${rowsHtml}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+
+// ========== 工单查询 ==========
+function searchWO() {
+  const q = (document.getElementById('woSearchInput').value || '').trim();
+  if (!q) return;
+  const body = document.getElementById('woModalBody');
+  body.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:24px;">查询中...</div>';
+  document.getElementById('woModal').style.display = 'flex';
+
+  fetch('/api/search_wo?q=' + encodeURIComponent(q) + '&t=' + Date.now())
+    .then(r => r.json())
+    .then(json => {
+      if (!json.success) {
+        body.innerHTML = '<div style="color:#f87171;padding:12px;">查询失败: ' + json.error + '</div>';
+        return;
+      }
+      if (!json.found || !json.results.length) {
+        body.innerHTML = '<div style="color:#fbbf24;text-align:center;padding:24px;">未找到工单 <strong>' + escHtml(q) + '</strong></div>';
+        return;
+      }
+
+      const STEP_COLORS = {
+        Print:'#38bdf8', Cut:'#4ade80', Pre:'#facc15',
+        Asm:'#fb923c', Bundle:'#c084fc', Test:'#f87171', Pack:'#2dd4bf'
+      };
+
+      let html = '';
+      json.results.forEach(r => {
+        const statusColor = r.current_status === '已完工' ? '#4ade80' : r.current_status === '进行中' ? '#fb923c' : '#94a3b8';
+        const lineTag = r.line ? `<span style="color:#a78bfa;font-size:11px;background:#a78bfa22;padding:1px 8px;border-radius:8px;margin-left:8px;">${escHtml(r.line)}</span>` : '';
+        html += `<div style="margin-bottom:20px;border:1px solid #334155;border-radius:6px;overflow:hidden;">
+          <div style="padding:8px 12px;background:#0f172a;display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:#e2e8f0;font-size:13px;font-weight:700;">${escHtml(r.job)}${lineTag}</span>
+            <span style="color:${statusColor};font-size:12px;font-weight:600;background:${statusColor}22;padding:2px 10px;border-radius:10px;">${r.current_status} → ${r.current_station}</span>
+          </div>
+          <div style="padding:12px 12px 8px;">`;
+
+        // 流程步骤图
+        html += '<div style="display:flex;align-items:center;gap:0;overflow-x:auto;padding-bottom:4px;">';
+        r.steps.forEach((step, idx) => {
+          const c = STEP_COLORS[step.station] || '#94a3b8';
+          const opacity = step.done ? '1' : '0.3';
+          html += `<div style="display:flex;flex-direction:column;align-items:center;min-width:68px;opacity:${opacity};">
+            <div style="width:32px;height:32px;border-radius:50%;background:${c};display:flex;align-items:center;justify-content:center;font-size:14px;color:#0f172a;font-weight:700;">${step.done ? '✓' : (idx + 1)}</div>
+            <div style="color:${c};font-size:11px;margin-top:4px;text-align:center;white-space:nowrap;">${escHtml(step.label)}</div>
+            <div style="color:#64748b;font-size:10px;margin-top:2px;text-align:center;">${step.done ? step.complete_time.slice(0,10) : '--'}</div>
+          </div>`;
+          if (idx < r.steps.length - 1) {
+            const nextDone = r.steps[idx+1] && r.steps[idx+1].done;
+            html += `<div style="flex:1;height:2px;background:${nextDone ? '#334155' : '#1e293b'};min-width:10px;margin-bottom:18px;"></div>`;
+          }
+        });
+        html += '</div>';
+        html += '</div></div>';
+      });
+
+      body.innerHTML = html;
+    })
+    .catch(e => {
+      body.innerHTML = '<div style="color:#f87171;padding:12px;">网络错误: ' + e.message + '</div>';
+    });
+}
+
+function closeWOModal() {
+  document.getElementById('woModal').style.display = 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('woModal').addEventListener('click', function(e) {
+    if (e.target === this) closeWOModal();
+  });
+});
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+
+// 实时时钟
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  const s = String(now.getSeconds()).padStart(2, '0');
+  document.getElementById('updated_at').textContent = h + ':' + m + ':' + s;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+loadData();
+loadExcelJobs();
+loadWIP();
+startAutoRefresh(300);
+</script>
+</body>
+</html>

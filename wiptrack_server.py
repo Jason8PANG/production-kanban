@@ -1,0 +1,1124 @@
+﻿# -*- coding: utf-8 -*-
+"""
+WIPTrack 实时数据 API 服务器
+访问 http://localhost:5678/api/data 获取最新数据
+"""
+
+import json
+import pyodbc
+from datetime import datetime, date
+from flask import Flask, jsonify, send_from_directory
+from flask_cors import CORS
+import os
+
+app = Flask(__name__)
+CORS(app)  # 允许跨域请求
+
+ODBC_DSN = os.environ.get('ODBC_DSN', 'wiptrack')
+ODBC_UID = os.environ.get('ODBC_UID', 'powerbi')
+ODBC_PWD = os.environ.get('ODBC_PWD', '!Q1234567')
+
+STATION_ORDER = ['Print', 'Cut', 'Pre', 'Asm', 'Test', 'Pack']
+STATION_LABEL = {
+    'Print': '工单打印',
+    'Cut': '剪线',
+    'Pre': '预处理',
+    'Asm': '组装',
+    'Test': '测试',
+    'Pack': '包装',
+}
+# 中文 Station 名称 → 英文 key 的映射（数据库存中文时使用）
+STATION_CN_TO_KEY = {v: k for k, v in STATION_LABEL.items()}
+# 追加其他可能的别名（含数据库中实际存储的"中文+英文"混合格式）
+STATION_CN_TO_KEY.update({
+    'Bundle': 'Bundle',
+    'bundle': 'Bundle',
+    'PRINT': 'Print', 'PRINT ': 'Print',
+    # ★★★ 数据库纯英文缩写（最优先，精确匹配）★★★
+    'Print': 'Print', 'Cut': 'Cut', 'Pre': 'Pre', 'Asm': 'Asm',
+    'Test': 'Test', 'Pack': 'Pack', 'Bundle': 'Bundle',
+    # 数据库实际存的值（英文变体）
+    'Cutting': 'Cut', 'Pretreat': 'Pre', 'Package': 'Pack',
+    'Assembly': 'Asm', 'Job': 'Print',  # Job=工单打印
+    # 数据库实际值（中文+英文混合格式）
+    '工单打印 Job Print': 'Print',
+    '剪线 Cutting': 'Cut',
+    '预处理 Pretreat': 'Pre',
+    '组装 Assembly': 'Asm',
+    '捆扎 Bundle': 'Bundle',
+    '测试 Test': 'Test',
+    '包装 Package': 'Pack',
+    # 模糊匹配：如果数据库值包含这些关键字也能匹配
+    'Job Print': 'Print',
+    'Cutting': 'Cut',
+    'Pretreat': 'Pre',
+    'Assembly': 'Asm',
+    'Package': 'Pack',
+})
+
+
+def parse_complete_date(val):
+    """
+    解析 CompleteDate，支持：
+    - datetime 对象（直接返回）
+    - date 对象（转为 datetime）
+    - 带 AM/PM 的12小时制字符串（如 '2026-05-05 2:24:00 PM'）
+      ★ 用 pandas.to_datetime 解析，不受 Windows 中文 locale 影响
+    - 普通 24小时制字符串（如 '2026-05-05 14:30:00'）
+    返回 datetime 对象，解析失败返回 None。
+    """
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return datetime.combine(val, datetime.min.time())
+    s = str(val).strip()
+    if not s or s == 'NaT' or s == 'nan':
+        return None
+
+    # ★ 方法1：pandas.to_datetime 最宽容，不受 locale 影响，能正确处理 AM/PM
+    try:
+        import pandas as pd
+        return pd.to_datetime(s).to_pydatetime()
+    except Exception:
+        pass
+
+    # ★ 方法2：手动处理 AM/PM（pandas 也失败时的兜底方案）
+    import re
+    m = re.match(
+        r'(?P<date>\d{4}[-/]\d{2}[-/]\d{2})\s+(?P<hour>\d{1,2}):(?P<min>\d{2})(?::(?P<sec>\d{2}))?\s+(?P<ampm>AM|PM)',
+        s, re.IGNORECASE
+    )
+    if m:
+        try:
+            date_str = m.group('date')
+            hour = int(m.group('hour'))
+            minute = int(m.group('min'))
+            second = int(m.group('sec')) if m.group('sec') else 0
+            ampm = m.group('ampm').upper()
+
+            # 12小时制 → 24小时制
+            if ampm == 'AM':
+                if hour == 12:
+                    hour = 0
+            else:
+                if hour != 12:
+                    hour += 12
+
+            if '-' in date_str:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+            else:
+                dt = datetime.strptime(date_str, '%Y/%m/%d')
+            return dt.replace(hour=hour, minute=minute, second=second)
+        except Exception:
+            pass
+
+    # ★ 方法3：普通24小时制
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M:%S',
+                '%Y-%m-%d %H:%M', '%Y/%m/%d %H:%M'):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
+def get_erp_schedule():
+    """从 erp_data.hmlv_production_schedule 表读取排程数据"""
+    import pandas as pd
+    conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT job, item, qty, ship_date, line, work_hours_h, 
+               unit_price, sales_amount, job_status, tested_qty, wo_total
+        FROM erp_data.hmlv_production_schedule
+    """)
+    columns = [col[0] for col in cursor.description]
+    rows_raw = cursor.fetchall()
+    conn.close()
+
+    # 将 row tuple 转为 list of dict，避免 pandas DataFrame 形状错误
+    data = []
+    for row in rows_raw:
+        row_dict = {}
+        for i, col in enumerate(columns):
+            row_dict[col] = row[i]
+        data.append(row_dict)
+    
+    df = pd.DataFrame(data)
+    df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
+    df['tested_qty'] = pd.to_numeric(df['tested_qty'], errors='coerce').fillna(0).astype(int)
+    df['wo_total'] = pd.to_numeric(df['wo_total'], errors='coerce').fillna(0).astype(int)
+    df['sales_amount'] = pd.to_numeric(df['sales_amount'], errors='coerce').fillna(0)
+    df['unit_price'] = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
+    df['work_hours_h'] = pd.to_numeric(df['work_hours_h'], errors='coerce').fillna(0)
+    df['_dt'] = pd.to_datetime(df['ship_date'], errors='coerce')
+    df['_month'] = df['_dt'].dt.to_period('M').astype(str)
+    return df
+
+
+def get_data():
+    conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM production_records WHERE SiteRef = 'NAIGROUP_PROD_310' ORDER BY id")
+    columns = [col[0] for col in cursor.description]
+    rows_raw = cursor.fetchall()
+    conn.close()
+
+    rows = []
+    for r in rows_raw:
+        row = {}
+        for i, col in enumerate(columns):
+            val = r[i]
+            if isinstance(val, (datetime, date)):
+                val = val.strftime('%Y-%m-%d')
+            row[col] = val
+        rows.append(row)
+
+    # 将 Station 字段中的中文值统一转为英文 key（如"组装"→"Asm"）
+    station_col_name = None
+    for col in columns:
+        if col.lower() in ('station', 'process', 'operation'):
+            station_col_name = col
+            break
+    if station_col_name:
+        for row in rows:
+            sv = str(row.get(station_col_name, '') or '').strip()
+            if sv in STATION_CN_TO_KEY:
+                row[station_col_name] = STATION_CN_TO_KEY[sv]
+
+    return columns, rows
+
+
+@app.route('/api/data')
+def api_data():
+    try:
+        import pandas as pd
+        columns, rows = get_data()
+
+        # 加载 ERP 排程数据（用于当月工单数计算）
+        df_all = get_erp_schedule()
+
+        # 找关键字段
+        col_lower = [c.lower() for c in columns]
+
+        def find_col(*names):
+            for n in names:
+                for i, c in enumerate(col_lower):
+                    if n in c:
+                        return columns[i]
+            return None
+
+        job_col = find_col('job', 'order', 'wo', 'siteref')
+        station_col = find_col('station', 'process', 'operation')
+        date_col = find_col('completedate', 'complete', 'date', 'created')
+
+        # ---- KPI ----
+        all_jobs = set(r[job_col] for r in rows if r.get(job_col))
+        total_jobs = len(all_jobs)
+
+        # 当月工单数
+        current_month = datetime.now().strftime('%Y-%m')
+        monthly_jobs = set()
+        for r in rows:
+            d = r.get(date_col, '') or ''
+            if d.startswith(current_month) and r.get(job_col):
+                monthly_jobs.add(r[job_col])
+        month_job_count = len(monthly_jobs) if monthly_jobs else total_jobs
+
+        # ---- 当天各工序完成数 (KPI 卡片用) ----
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_station_done = {}
+        for s in STATION_ORDER:
+            done_today = set()
+            for r in rows:
+                sv = str(r.get(station_col, '') or '').strip()
+                dv = str(r.get(date_col, '') or '').strip()
+                if sv == s and dv.startswith(today_str):
+                    j = r.get(job_col)
+                    if j:
+                        done_today.add(j)
+            today_station_done[s] = len(done_today)
+
+        # ---- 工序完成率（仅统计当月数据）----
+        # 基准数 = 当月工单总数（ship_date在当月的工单数）
+        # 需要从 df_all 获取当月工单总数
+        df_this_month = df_all[df_all['_month'] == current_month]
+        month_total_jobs = len(df_this_month['job'].dropna().astype(str).str.strip().unique())
+        base = month_total_jobs if month_total_jobs > 0 else 1  # 避免除零
+
+        station_stats = []
+        for s in STATION_ORDER:
+            done_jobs_month = set()
+            for r in rows:
+                sv = str(r.get(station_col, '') or '').strip()
+                dv = str(r.get(date_col, '') or '').strip()
+                j = r.get(job_col)
+                if sv == s and j and dv.startswith(current_month):
+                    done_jobs_month.add(j)
+            done_month = len(done_jobs_month)
+            pct = round(done_month / base * 100, 1) if base > 0 else 0
+            station_stats.append({
+                'station': s,
+                'label': STATION_LABEL.get(s, s),
+                'done': done_month,
+                'base': base,
+                'pct': pct
+            })
+
+        # ---- 每日趋势 ----
+        daily = {}
+        for r in rows:
+            d = r.get(date_col, '') or ''
+            if d:
+                d = d[:10]
+                if d not in daily:
+                    daily[d] = {'done': 0, 'running': 0}
+                sv = str(r.get(station_col, '') or '').strip()
+                dv = str(r.get(date_col, '') or '').strip()
+                if dv:
+                    daily[d]['done'] += 1
+                else:
+                    daily[d]['running'] += 1
+
+        daily_list = sorted([
+            {'date': k, 'done': v['done'], 'running': v['running']}
+            for k, v in daily.items()
+        ], key=lambda x: x['date'])
+
+        # ---- 工序甘特/流程 WIP ----
+        # 在制品：已打印但尚未到达该工序完成的工单
+        # 所有数据从 production_records 表获取，只统计当月数据
+        wip_by_station = []
+        for i, s in enumerate(STATION_ORDER):
+            # 在制品 = 前一道工序完成的工单数 - 当前工序完成的工单数
+            if i == 0:
+                # 第一道工序：WIP = 当月工单总数 - 当前工序完成数
+                prev_done = base  # base = 当月工单总数
+            else:
+                prev_s = STATION_ORDER[i-1]
+                prev_done_jobs = set()
+                for r in rows:
+                    sv = str(r.get(station_col, '') or '').strip()
+                    dv = str(r.get(date_col, '') or '').strip()
+                    # 只统计当月完成的数据
+                    if sv == prev_s and dv.startswith(current_month):
+                        j = r.get(job_col)
+                        if j:
+                            prev_done_jobs.add(j)
+                prev_done = len(prev_done_jobs)
+
+            cur_done_jobs = set()
+            for r in rows:
+                sv = str(r.get(station_col, '') or '').strip()
+                dv = str(r.get(date_col, '') or '').strip()
+                # 只统计当月完成的数据
+                if sv == s and dv.startswith(current_month):
+                    j = r.get(job_col)
+                    if j:
+                        cur_done_jobs.add(j)
+            cur_done = len(cur_done_jobs)
+            wip = max(0, prev_done - cur_done)
+            
+            # ---- 计算滞留天数 ----
+            # 滞留工单：已完成前一道工序但尚未完成当前工序的工单
+            滞留_jobs = prev_done_jobs - cur_done_jobs if i > 0 else set()
+            if i == 0:
+                # 第一道工序：滞留 = 当月工单 - Print完成
+                滞留_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().unique()) - cur_done_jobs
+            
+            if len(滞留_jobs) > 0:
+                # 计算平均滞留天数
+                total_days = 0
+                count_with_date = 0
+                for job_id in 滞留_jobs:
+                    # 查找该工单在前一道工序的完成日期
+                    prev_complete_date = None
+                    for r in rows:
+                        sv = str(r.get(station_col, '') or '').strip()
+                        dv = str(r.get(date_col, '') or '').strip()
+                        j = r.get(job_col)
+                        if sv == (STATION_ORDER[i-1] if i > 0 else 'Print') and dv and str(j).strip() == str(job_id).strip():
+                            try:
+                                prev_complete_date = datetime.strptime(dv[:10], '%Y-%m-%d')
+                                break
+                            except:
+                                pass
+                    
+                    if prev_complete_date:
+                        # 计算到今天的滞留天数
+                        today = datetime.now()
+                        days = (today - prev_complete_date).days
+                        total_days += days
+                        count_with_date += 1
+                
+                avg_days = round(total_days / count_with_date, 1) if count_with_date > 0 else 0
+            else:
+                avg_days = 0
+            
+            wip_by_station.append({
+                'station': s,
+                'label': STATION_LABEL.get(s, s),
+                'wip': wip,
+                '滞留_count': len(滞留_jobs),
+                '滞留_avg_days': avg_days
+            })
+
+        # ---- 最近 50 条工单明细 ----
+        recent = rows[-50:] if len(rows) > 50 else rows
+        recent_list = [dict(r) for r in recent]
+
+        return jsonify({
+            'success': True,
+            'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'kpi': {
+                'month_label': datetime.now().strftime('%Y年%m月'),
+                'month_jobs': month_job_count,
+                'total_jobs': total_jobs,
+                'base': base,
+                'total_records': len(rows),
+                'today_label': datetime.now().strftime('%m月%d日'),
+                'today_station_done': today_station_done,  # 当天各工序完成数
+            },
+            'station_stats': station_stats,
+            'daily_trend': daily_list,
+            'wip': wip_by_station,
+            'recent': recent_list,
+            'columns': columns,
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/api/excel_jobs')
+def api_excel_jobs():
+    """从数据库 erp_data.hmlv_production_schedule 表读取生产数据，计算销售统计、组装工时、工序销售"""
+    try:
+        import pandas as pd
+        from datetime import date
+
+        # ========== 组装工序单根时间（从 Excel 读取）==========
+        path_asm = 'I:/Production/01 Cor&Fiber Production/14-手工排产/AI排产文件夹/组装工序单根生产时间.xlsx'
+        df_asm = pd.read_excel(path_asm)
+        asm_cols = df_asm.columns.tolist()
+        df_asm = df_asm[[asm_cols[0], asm_cols[1]]].dropna()
+        df_asm.columns = ['PN', 'AsmTime']
+        asm_time_map = dict(zip(df_asm['PN'].astype(str).str.strip(), df_asm['AsmTime'].astype(float)))
+
+        # ========== 从数据库读取生产排程数据 ==========
+        df_all = get_erp_schedule()
+        now_month = date.today().strftime('%Y-%m')
+
+        # 处理 job_status 字段（可能有大小写问题）
+        df_all['job_status'] = df_all['job_status'].fillna('').astype(str).str.strip()
+        # 统一大小写
+        df_all['job_status_lower'] = df_all['job_status'].str.lower()
+
+        # 当月数据
+        df_this = df_all[df_all['_month'] == now_month]
+
+        result = {}
+
+        # ========== 排产计划统计 ==========
+        result['schedule'] = {
+            'label': '排产计划',
+            'total': int(df_all['job'].nunique()),
+            'by_month': {str(k): int(v) for k, v in df_all.groupby('_month')['job'].nunique().items()}
+        }
+
+        # ========== 入库记录统计（job_status='已完成'的工单）==========
+        completed_df = df_all[df_all['job_status_lower'] == '已完成']
+        result['ruku'] = {
+            'label': '入库记录',
+            'total': int(completed_df['job'].nunique()),
+            'by_month': {str(k): int(v) for k, v in completed_df.groupby('_month')['job'].nunique().items()}
+        }
+
+        # ========== 获取各工序完成的工单集合 ==========
+        columns_pr, records = get_data()
+
+        def find_col(*names):
+            for n in names:
+                for c in columns_pr:
+                    if n in c.lower():
+                        return c
+            return None
+
+        job_col = find_col('job', 'order', 'wo', 'siteref')
+        station_col = find_col('station', 'process', 'operation')
+        date_col = find_col('completedate', 'complete', 'date', 'created')
+
+        station_jobs = {s: set() for s in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']}
+
+        for r in records:
+            station_raw = str(r.get(station_col, '') or '').strip()
+            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            job = str(r.get(job_col, '') or '').strip()
+            if job and station_en in station_jobs:
+                station_jobs[station_en].add(job)
+
+        # ========== 工单→销售映射（从数据库erp_data表）==========
+        job_sales_map = {}
+        for _, row in df_all.iterrows():
+            job_key = str(row['job']).strip()
+            job_sales_map[job_key] = float(row['sales_amount'])
+
+        # ========== 工单→Item/工单数映射（从数据库erp_data表）==========
+        job_item_released = {}
+        for _, row in df_all.iterrows():
+            j = str(row['job']).strip()
+            item = str(row['item']).strip() if pd.notna(row['item']) else ''
+            # 使用 qty 字段作为工单数
+            released = int(row['qty']) if pd.notna(row['qty']) else 0
+            if j and j not in job_item_released:
+                job_item_released[j] = (item, released)
+
+        # ========== 当前月份工单集合（用于各模块引用）==========
+        df_this_month = df_all[df_all['_month'] == now_month]
+        all_month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().unique())
+
+        # ========== 工序销售金额 ==========
+        # 逻辑：每个工序的销售 = ship_date在当月 且 当月完成了该工序的所有工单的销售之和（按工单去重）
+        station_sales = {st: 0.0 for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']}
+        STATION_LIST = ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']
+
+        # 先收集当月各工序完成的工单集合（去重）
+        station_jobs_map = {st: set() for st in STATION_LIST}
+        for r in records:
+            station_raw = str(r.get(station_col, '') or '').strip()
+            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            dv = str(r.get(date_col, '') or '').strip()
+            if station_en in STATION_LIST and dv.startswith(now_month):
+                job = str(r.get(job_col, '') or '').strip()
+                if job:
+                    station_jobs_map[station_en].add(job)
+
+        # 只取当月完成了该工序的工单，按工单去重累加销售额
+        for st in STATION_LIST:
+            sales = 0.0
+            for job in station_jobs_map[st]:
+                sales += job_sales_map.get(job, 0)
+            station_sales[st] = round(sales, 2)
+        result['station_sales'] = station_sales
+
+        # ========== 当前月份统计 ==========
+        # 当月工单总数 = 所有 ship_date 在当月的 JOB（不管完成还是未完成）
+        
+        # 已完成：ship_date在当月 且 job_status='已完成'
+        completed_jobs = set(completed_df[completed_df['_month'] == now_month]['job'].dropna().astype(str).str.strip().unique())
+        # 未完成：ship_date在当月 且 job_status!='已完成'
+        pending_jobs = all_month_jobs - completed_jobs
+
+        result['current_month'] = {
+            'label': f'{now_month}',
+            'total': len(all_month_jobs),
+            'completed': len(completed_jobs),
+            'pending': len(pending_jobs),
+        }
+
+        # ========== 各工序已消耗工时 & 总工时 ==========
+        station_hours = {}
+        for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
+            hours = 0
+            for r in records:
+                station_raw = str(r.get(station_col, '') or '').strip()
+                station_en = STATION_CN_TO_KEY.get(station_raw, '')
+                dv = str(r.get(date_col, '') or '').strip()
+                if station_en == st and dv.startswith(now_month):
+                    job = str(r.get(job_col, '') or '').strip()
+                    if job:
+                        item, released = job_item_released.get(job, ('', 0))
+                        asm_time = asm_time_map.get(item, 0)
+                        hours += released * asm_time
+            station_hours[st] = round(hours, 2)
+        result['station_hours'] = station_hours
+
+        # ========== 每个工序当天完成的工时 ==========
+        today_str_db = date.today().strftime('%Y-%m-%d')
+        station_hours_today = {}
+        for r in records:
+            dv = str(r.get(date_col, '') or '').strip()
+            if not dv.startswith(today_str_db):
+                continue
+            station_cn = str(r.get(station_col, '') or '').strip()
+            station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
+            if station_en not in station_hours_today:
+                station_hours_today[station_en] = 0
+            job = str(r.get(job_col, '') or '').strip()
+            if job:
+                item, released = job_item_released.get(job, ('', 0))
+                asm_time = asm_time_map.get(item, 0)
+                station_hours_today[station_en] += released * asm_time
+        # 确保所有工序都有值
+        for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
+            station_hours_today[st] = round(station_hours_today.get(st, 0), 2)
+        result['station_hours_today'] = station_hours_today
+
+        # ========== 销售统计 ==========
+        # 从数据库erp_data表计算当月总销售额
+        total_sales = float(df_this_month['sales_amount'].sum())
+        pending_sales = float(df_this_month[df_this_month['job_status_lower'] != '已完成']['sales_amount'].sum())
+        completed_sales = float(df_this_month[df_this_month['job_status_lower'] == '已完成']['sales_amount'].sum())
+
+        # 入库完成率
+        ruku_completed_sales = completed_sales
+        sales_completion_rate = round((ruku_completed_sales / total_sales * 100), 1) if total_sales > 0 else 0
+
+        result['sales'] = {
+            'pending_sales': pending_sales,
+            'completed_sales': completed_sales,
+            'total_sales': total_sales,
+            'ruku_completed_sales': round(ruku_completed_sales, 2),
+            'sales_completion_rate': sales_completion_rate,
+        }
+
+        # ========== 组装工时（仅当月ship_date的工单）==========
+        def calc_asm_hours(df_jobs):
+            total_hours, job_count = 0, 0
+            for _, row in df_jobs.iterrows():
+                job = str(row['job']).strip()
+                item = str(row['item']).strip() if pd.notna(row['item']) else ''
+                released = int(row['qty']) if pd.notna(row['qty']) else 0
+                asm_time = asm_time_map.get(item, 0)
+                total_hours += released * asm_time
+                job_count += 1
+            return round(total_hours, 2), job_count
+
+        # ★ 修改：只统计ship_date在当前月份的工单
+        pending_asm_df = df_this_month[(df_this_month['job_status_lower'] != '已完成')]
+        completed_asm_df = df_this_month[df_this_month['job_status_lower'] == '已完成']
+
+        pending_asm_hours, pending_asm_count = calc_asm_hours(pending_asm_df)
+        completed_asm_hours, completed_asm_count = calc_asm_hours(completed_asm_df)
+        result['asm_hours'] = {
+            'pending_hours': pending_asm_hours,
+            'pending_count': pending_asm_count,
+            'completed_hours': completed_asm_hours,
+            'completed_count': completed_asm_count,
+            'total_hours': round(pending_asm_hours + completed_asm_hours, 2),
+        }
+        # 当月总工时 = asm_hours.total_hours（仅当月ship_date工单）
+        result['total_hours_all'] = result['asm_hours']['total_hours']
+
+        # ========== 每日工时目标（仅当月ship_date工单，按工作日计算）==========
+        # ★ 总目标工时已改为仅当月ship_date工单（见上方 asm_hours.total_hours）
+        from calendar import monthrange
+
+        year, month = date.today().year, date.today().month
+        days_in_month = monthrange(year, month)[1]
+        today_day = date.today().day
+
+        # 2026年中国法定节假日（放假日期）
+        HOLIDAYS_2026 = {
+            date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3),
+            date(2026, 2, 15), date(2026, 2, 16), date(2026, 2, 17), date(2026, 2, 18),
+            date(2026, 2, 19), date(2026, 2, 20), date(2026, 2, 21), date(2026, 2, 22),
+            date(2026, 2, 23),
+            date(2026, 4, 4), date(2026, 4, 5), date(2026, 4, 6),
+            date(2026, 5, 1), date(2026, 5, 2), date(2026, 5, 3), date(2026, 5, 4),
+            date(2026, 5, 5),
+            date(2026, 6, 19), date(2026, 6, 20), date(2026, 6, 21),
+            date(2026, 9, 25), date(2026, 9, 26), date(2026, 9, 27),
+            date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 3), date(2026, 10, 4),
+            date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7),
+        }
+        EXTRA_WORKDAYS_2026 = {
+            date(2026, 1, 4), date(2026, 2, 14), date(2026, 2, 28),
+            date(2026, 5, 9), date(2026, 9, 20), date(2026, 10, 10),
+        }
+
+        def is_workday(d):
+            if d in HOLIDAYS_2026:
+                return False
+            if d in EXTRA_WORKDAYS_2026:
+                return True
+            return d.weekday() < 5
+
+        # 当月工作日总数
+        workdays_in_month = sum(
+            1 for day in range(1, days_in_month + 1)
+            if is_workday(date(year, month, day))
+        )
+        # 截止到今天已过去的工作日数
+        passed_workdays = sum(
+            1 for day in range(1, today_day + 1)
+            if is_workday(date(year, month, day))
+        )
+
+        total_target_hours = result['asm_hours']['total_hours']
+        daily_target_hours = round(total_target_hours / workdays_in_month, 2) if workdays_in_month > 0 else 0
+        realtime_target_hours = round(daily_target_hours * passed_workdays, 2)
+        result['daily_target_hours'] = daily_target_hours
+        result['realtime_target_hours'] = realtime_target_hours
+        result['workdays_in_month'] = workdays_in_month
+        result['passed_workdays'] = passed_workdays
+
+        # ========== 每个工序的每日工时目标（按工序工时占比分摊总每日目标）==========
+        total_station_hours = sum(result['station_hours'].values()) or 1
+        station_daily_target = {}
+        for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
+            ratio = result['station_hours'][st] / total_station_hours
+            station_daily_target[st] = round(daily_target_hours * ratio, 2)
+        result['station_daily_target'] = station_daily_target
+
+        return jsonify({'success': True, 'data': result})
+
+    except Exception as e:
+        import traceback
+        print(f"[ERROR api_excel_jobs] {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/api/wip')
+def api_wip():
+    """各工序 WIP 滞留工单列表：每个工序未完成下一道工序的 JOB + Item + 滞留时间"""
+    try:
+        import pandas as pd
+
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+        cursor = conn.cursor()
+
+        # 工序顺序（从 site_station 表）
+        # 工序流程：Print → Cut → Pre → Asm → Test → Pack（忽略Bundle）
+        STATION_ORDER_CN = ['工单打印', '剪线', '预处理', '组装', '测试', '包装']
+        STATION_CN_TO_EN = {
+            '工单打印': 'Print', '剪线': 'Cut', '预处理': 'Pre',
+            '组装': 'Asm', '测试': 'Test', '包装': 'Pack'
+        }
+
+        # 获取310站点所有记录（只统计310站点的数据）
+        cursor.execute(
+            "SELECT Job, Station, CompleteDate FROM production_records "
+            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND CompleteDate IS NOT NULL"
+        )
+        rows = cursor.fetchall()
+        # 不关闭连接，后面还要查异常表
+
+        # 构建 job → {station_en: CompleteDate}
+        # 使用全局 parse_complete_date 函数解析 CompleteDate（支持 AM/PM 格式）
+        # 同时将数据库中的 Station 值（可能是"中文+英文"混合格式）转为标准英文 key
+        job_station_time = {}
+        for row in rows:
+            job = str(row[0]).strip()
+            station_raw = str(row[1]).strip()
+            # 转为标准英文 key（先查映射表，找不到时尝试提取英文部分）
+            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            if not station_en:
+                import re
+                m = re.search(r'([A-Za-z]+)', station_raw)
+                if m:
+                    eng = m.group(1)
+                    eng_map = {'Print':'Print','Cut':'Cut','Pre':'Pre','Asm':'Asm',
+                               'Test':'Test','Pack':'Pack','Cutting':'Cut','Assembly':'Asm',
+                               'Pretreat':'Pre','Package':'Pack','Job':'Print'}
+                    station_en = eng_map.get(eng, eng)
+            if not station_en:
+                station_en = station_raw
+            complete_date = parse_complete_date(row[2])
+            if job not in job_station_time:
+                job_station_time[job] = {}
+            if complete_date:
+                job_station_time[job][station_en] = complete_date
+
+        # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Item/Line 映射
+        job_item_map = {}
+        job_line_map = {}
+        try:
+            import pandas as pd
+            df_erp = get_erp_schedule()
+            for _, row in df_erp.iterrows():
+                j = str(row['job']).strip()
+                if not j or j == 'nan':
+                    continue
+                item = str(row['item']).strip() if pd.notna(row['item']) else ''
+                if item and item != 'nan':
+                    job_item_map[j] = item
+                line = str(row['line']).strip() if pd.notna(row['line']) else ''
+                if line and line != 'nan':
+                    job_line_map[j] = line
+            print(f"[DEBUG] job_item_map 加载 {len(job_item_map)} 条, job_line_map 加载 {len(job_line_map)} 条")
+        except Exception as e:
+            print(f"[WARN] ERP数据读取失败: {e}")
+
+        # 查询异常工单
+        exc_by_job = {}
+        try:
+            cursor.execute(
+                "SELECT Station, Job, description, start_time FROM wip_exceptions "
+                "WHERE SiteRef = 'NAIGROUP_PROD_310' AND end_time IS NULL"
+            )
+            exc_rows = cursor.fetchall()
+            for er in exc_rows:
+                exc_job = str(er[1]).strip()
+                exc_station = str(er[0]).strip()
+                exc_desc = str(er[2]).strip() if er[2] else ''
+                exc_start = parse_complete_date(er[3])
+                if exc_job not in exc_by_job:
+                    exc_by_job[exc_job] = []
+                exc_by_job[exc_job].append({
+                    'station': exc_station,
+                    'description': exc_desc,
+                    'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else ''
+                })
+        except Exception as e:
+            print(f"[WARN] 异常工单查询失败: {e}")
+            exc_by_job = {}
+        
+        conn.close()
+
+        now = datetime.now()
+        # 当月范围（动态计算）
+        year, month = now.year, now.month
+        month_start = datetime(year, month, 1)
+        import calendar
+        days_in_month = calendar.monthrange(year, month)[1]
+        month_end = datetime(year, month, days_in_month, 23, 59, 59)
+
+        # 找出当月有记录的工单（任意工序在当月完成）
+        month_jobs = set()
+        for job, stations in job_station_time.items():
+            for t in stations.values():
+                if month_start <= t <= month_end:
+                    month_jobs.add(job)
+                    break
+
+        result = {}
+
+        # ★ 调试：打印关键统计
+        print(f"[DEBUG] month_jobs 工单数: {len(month_jobs)}")
+        print(f"[DEBUG] 剪线(Cut)WIP计算: 遍历 {len(month_jobs)} 个工单...")
+
+        # 对每个工序（跳过第一道"工单打印"）：
+        # - 完成数：该工序在当月完成
+        # - 滞留数：有当月记录的工单中，上道工序在当月完成但当前工序未完成
+        for i, station_cn in enumerate(STATION_ORDER_CN):
+            if i == 0:
+                continue  # 工单打印不需要 WIP
+            prev_station_cn = STATION_ORDER_CN[i - 1]
+            station_en = STATION_CN_TO_EN.get(station_cn, station_cn)
+            prev_station_en = STATION_CN_TO_EN.get(prev_station_cn, prev_station_cn)
+
+            done_in_month = 0
+            wip_list = []
+            for job in month_jobs:  # 只看有当月记录的工单
+                stations = job_station_time.get(job, {})
+                # 完成数：当前工序在当月完成
+                if station_en in stations:
+                    t = stations[station_en]
+                    if month_start <= t <= month_end:
+                        done_in_month += 1
+                # 滞留数：上道工序在当月完成，但当前工序未完成
+                elif prev_station_en in stations:
+                    prev_t = stations[prev_station_en]
+                    if month_start <= prev_t <= month_end:
+                        dwell_hours = round((now - prev_t).total_seconds() / 3600, 1)
+                        wip_entry = {
+                            'job': job,
+                            'item': job_item_map.get(job, ''),
+                            'line': job_line_map.get(job, ''),
+                            'complete_time': prev_t.strftime('%Y-%m-%d %H:%M'),
+                            'dwell_hours': dwell_hours,
+                        }
+                        if job in exc_by_job:
+                            wip_entry['exception'] = exc_by_job[job]
+                        wip_list.append(wip_entry)
+
+            # 按滞留时间降序
+            wip_list.sort(key=lambda x: -x['dwell_hours'])
+
+            # ★ 调试：打印各工序统计
+            print(f"[DEBUG] {station_en} ({station_cn}): done_in_month={done_in_month}, wip_count={len(wip_list)}")
+
+            result[station_en] = {
+                'label': station_cn,
+                'count': len(wip_list),  # 5月滞留数
+'done_in_month': done_in_month,      # 当月完成数（新增）
+                'jobs': wip_list
+            }
+
+        return jsonify({'success': True, 'data': result})
+
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/api/search_wo')
+def api_search_wo():
+    """
+    工单状态查询接口
+    参数: q=工单号（支持模糊匹配，不区分大小写）
+    返回: 该工单在各工序的完成情况及当前所处阶段
+    """
+    from flask import request as flask_request
+    q = (flask_request.args.get('q') or '').strip()
+    if not q:
+        return jsonify({'success': False, 'error': '请输入工单号'})
+
+    try:
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+        cursor = conn.cursor()
+
+        # 用 LIKE 模糊匹配工单号（Job 字段），同时过滤 SiteRef
+        cursor.execute(
+            "SELECT Job, Station, CompleteDate FROM production_records "
+            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND LOWER(Job) LIKE ? ORDER BY CompleteDate",
+            ('%' + q.lower() + '%',)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return jsonify({'success': True, 'found': False, 'q': q, 'results': []})
+
+        # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Line 映射
+        job_line_map = {}
+        try:
+            import pandas as pd
+            df_erp = get_erp_schedule()
+            for _, row in df_erp.iterrows():
+                j = str(row['job']).strip()
+                if not j or j == 'nan':
+                    continue
+                line = str(row['line']).strip() if pd.notna(row['line']) else ''
+                if line and line != 'nan':
+                    job_line_map[j] = line
+        except Exception:
+            pass
+
+        # 按工单号归组，记录每道工序的完成时间
+        job_map = {}
+        for row in rows:
+            job = str(row[0]).strip()
+            station_raw = str(row[1]).strip()
+            complete_dt = parse_complete_date(row[2])  # 使用全局函数解析（支持 AM/PM）
+            # 统一 station key
+            station_key = STATION_CN_TO_KEY.get(station_raw, station_raw)
+            complete_str = ''
+            if complete_dt:
+                # complete_dt 现在是 datetime 对象，可以安全调用 strftime
+                if hasattr(complete_dt, 'hour'):
+                    complete_str = complete_dt.strftime('%Y-%m-%d %H:%M')
+                else:
+                    complete_str = complete_dt.strftime('%Y-%m-%d')
+            if job not in job_map:
+                job_map[job] = {}
+            # 同一工序取最新完成时间（用 datetime 对象比较，而不是字符串）
+            if station_key not in job_map[job] or complete_dt > job_map[job][station_key][0]:
+                job_map[job][station_key] = (complete_dt, complete_str)
+
+        results = []
+        for job, station_times in sorted(job_map.items()):
+            # 构造工序流转明细
+            steps = []
+            last_done_idx = -1
+            for idx, s in enumerate(STATION_ORDER):
+                ct_tuple = station_times.get(s, (None, ''))
+                ct_str = ct_tuple[1] if ct_tuple else ''  # 取 complete_str
+                done = bool(ct_str)
+                if done:
+                    last_done_idx = idx
+                steps.append({
+                    'station': s,
+                    'label': STATION_LABEL.get(s, s),
+                    'done': done,
+                    'complete_time': ct_str
+                })
+
+            # 当前状态判断
+            if last_done_idx == len(STATION_ORDER) - 1:
+                current_status = '已完工'
+                current_station = STATION_LABEL.get(STATION_ORDER[-1], STATION_ORDER[-1])
+            elif last_done_idx >= 0:
+                next_s = STATION_ORDER[last_done_idx + 1]
+                current_status = '进行中'
+                current_station = STATION_LABEL.get(next_s, next_s)
+            else:
+                current_status = '待处理'
+                current_station = STATION_LABEL.get(STATION_ORDER[0], STATION_ORDER[0])
+
+            results.append({
+                'job': job,
+                'line': job_line_map.get(job, ''),
+                'current_status': current_status,
+                'current_station': current_station,
+                'steps': steps
+            })
+
+        return jsonify({'success': True, 'found': True, 'q': q, 'results': results})
+
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/api/hours-daily')
+def api_hours_daily():
+    """
+    每日工时完成进度（累计）
+    返回当月每个工作日的：当日目标工时、累计目标率、当日完成工时、累计完成率
+    """
+    try:
+        import pandas as pd
+        from calendar import monthrange
+
+        year, month = date.today().year, date.today().month
+        days_in_month = monthrange(year, month)[1]
+        today_day = date.today().day
+
+        # ========== 组装工序单根时间 ==========
+        path_asm = 'I:/Production/01 Cor&Fiber Production/14-手工排产/AI排产文件夹/组装工序单根生产时间.xlsx'
+        df_asm = pd.read_excel(path_asm)
+        asm_cols = df_asm.columns.tolist()
+        df_asm = df_asm[[asm_cols[0], asm_cols[1]]].dropna()
+        df_asm.columns = ['PN', 'AsmTime']
+        asm_time_map = dict(zip(df_asm['PN'].astype(str).str.strip(), df_asm['AsmTime'].astype(float)))
+
+        # ========== 总目标工时（从数据库 erp_data.hmlv_production_schedule 计算）==========
+        df_erp = get_erp_schedule()
+
+        def calc_total_hours_from_db(df_erp):
+            total = 0
+            for _, row in df_erp.iterrows():
+                item = str(row['item']).strip() if pd.notna(row['item']) else ''
+                qty = int(row['qty']) if pd.notna(row['qty']) else 0
+                total += qty * asm_time_map.get(item, 0)
+            return total
+
+        total_target = round(calc_total_hours_from_db(df_erp), 2)
+
+        # ========== 工作日判断 ==========
+        HOLIDAYS_2026 = {
+            date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3),
+            date(2026, 2, 15), date(2026, 2, 16), date(2026, 2, 17), date(2026, 2, 18),
+            date(2026, 2, 19), date(2026, 2, 20), date(2026, 2, 21), date(2026, 2, 22),
+            date(2026, 2, 23),
+            date(2026, 4, 4), date(2026, 4, 5), date(2026, 4, 6),
+            date(2026, 5, 1), date(2026, 5, 2), date(2026, 5, 3), date(2026, 5, 4),
+            date(2026, 5, 5),
+            date(2026, 6, 19), date(2026, 6, 20), date(2026, 6, 21),
+            date(2026, 9, 25), date(2026, 9, 26), date(2026, 9, 27),
+            date(2026, 10, 1), date(2026, 10, 2), date(2026, 10, 3), date(2026, 10, 4),
+            date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 7),
+        }
+        EXTRA_WORKDAYS_2026 = {
+            date(2026, 1, 4), date(2026, 2, 14), date(2026, 2, 28),
+            date(2026, 5, 9), date(2026, 9, 20), date(2026, 10, 10),
+        }
+
+        def is_workday(d):
+            if d in HOLIDAYS_2026: return False
+            if d in EXTRA_WORKDAYS_2026: return True
+            return d.weekday() < 5
+
+        # 当月工作日列表
+        workdays = [date(year, month, d) for d in range(1, days_in_month + 1) if is_workday(date(year, month, d))]
+        workdays_in_month = len(workdays)
+        daily_target = round(total_target / workdays_in_month, 2) if workdays_in_month > 0 else 0
+
+        # ========== 从数据库获取当月每日完成工时 ==========
+        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+        cursor = conn.cursor()
+
+        current_month = date.today().strftime('%Y-%m')
+        cursor.execute(
+            "SELECT Job, Station, CompleteDate FROM production_records "
+            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND CompleteDate IS NOT NULL AND CompleteDate LIKE ?",
+            (current_month + '%',)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+
+        # 构建 Job→(Item, Qty) 映射（用于查询单根时间和工单数）
+        job_info_map = {}  # job -> (item, qty)
+        df_erp = get_erp_schedule()
+        for _, r in df_erp.iterrows():
+            j = str(r['job']).strip()
+            item = str(r['item']).strip() if pd.notna(r['item']) else ''
+            qty = int(r['qty']) if pd.notna(r['qty']) else 0
+            if j and j not in job_info_map:
+                job_info_map[j] = (item, qty)
+
+        # 按日期汇总完成工时
+        # 策略：每条工序记录都代表该工单完成了某道工序，计入当日完成工时
+        # 工时 = Released（工单数）× 单根组装时间
+        daily_completed = {}  # date_str -> hours
+        for row in rows:
+            job = str(row[0]).strip()
+            station_raw = str(row[1]).strip()
+            cd = parse_complete_date(row[2])
+            if not cd:
+                continue
+            day_str = cd.strftime('%Y-%m-%d')
+
+            info = job_info_map.get(job, ('', 0))
+            item, released = info
+            asm_time = asm_time_map.get(item, 0)
+            if asm_time == 0 or released == 0:
+                continue
+
+            hours = released * asm_time
+            if day_str not in daily_completed:
+                daily_completed[day_str] = 0
+            daily_completed[day_str] += hours
+
+        # ========== 构建每日累计进度 ==========
+        daily_list = []
+        cum_target = 0
+        cum_actual = 0
+
+        for wd in workdays:
+            if wd.day > today_day:
+                break  # 还没到的日期不显示
+            wd_str = wd.strftime('%Y-%m-%d')
+            cum_target += daily_target
+            day_actual = daily_completed.get(wd_str, 0)
+            cum_actual += day_actual
+
+            daily_list.append({
+                'date': wd_str,
+                'date_short': f'{month}/{wd.day}',
+                'weekday': ['周一','周二','周三','周四','周五','周六','周日'][wd.weekday()],
+                'daily_target': daily_target,
+                'cum_target': round(cum_target, 2),
+                'target_rate': round(cum_target / total_target * 100, 1) if total_target > 0 else 0,
+                'daily_actual': round(day_actual, 2),
+                'cum_actual': round(cum_actual, 2),
+                'actual_rate': round(cum_actual / total_target * 100, 1) if total_target > 0 else 0,
+            })
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_target': total_target,
+                'workdays_in_month': workdays_in_month,
+                'daily_target': daily_target,
+                'daily_list': daily_list,
+            }
+        })
+
+    except Exception as e:
+        import traceback
+        return jsonify({'success': False, 'error': str(e), 'trace': traceback.format_exc()}), 500
+
+
+@app.route('/')
+def index():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    return send_from_directory(base_dir, 'HMLV生产看板.html')
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', '5678'))
+    print("=" * 50)
+    print("WIPTrack 实时看板服务器启动中...")
+    print(f"访问地址: http://localhost:{port}")
+    print(f"数据接口: http://localhost:{port}/api/data")
+    print("按 Ctrl+C 停止服务器")
+    print("=" * 50)
+    app.run(host='0.0.0.0', port=port, debug=False)
