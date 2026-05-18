@@ -5,7 +5,7 @@ WIPTrack 实时数据 API 服务器
 """
 
 import json
-import pyodbc
+import pymysql
 from datetime import datetime, date
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
@@ -14,9 +14,11 @@ import os
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
 
-ODBC_DSN = os.environ.get('ODBC_DSN', 'wiptrack')
-ODBC_UID = os.environ.get('ODBC_UID', 'powerbi')
-ODBC_PWD = os.environ.get('ODBC_PWD', '!Q1234567')
+MYSQL_HOST = os.environ.get('MYSQL_HOST', '10.0.6.86')
+MYSQL_PORT = int(os.environ.get('MYSQL_PORT', 33306))
+MYSQL_USER = os.environ.get('MYSQL_USER', 'powerbi')
+MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', '!Q1234567')
+MYSQL_DATABASE = os.environ.get('MYSQL_DATABASE', 'wiptrack')
 
 STATION_ORDER = ['Print', 'Cut', 'Pre', 'Asm', 'Test', 'Pack']
 STATION_LABEL = {
@@ -128,7 +130,7 @@ def parse_complete_date(val):
 def get_erp_schedule():
     """从 erp_data.hmlv_production_schedule 表读取排程数据"""
     import pandas as pd
-    conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+    conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT job, item, qty, ship_date, line, work_hours_h,
@@ -162,7 +164,7 @@ def get_erp_schedule():
 
 
 def get_data():
-    conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+    conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM production_records WHERE SiteRef = 'NAIGROUP_PROD_310' ORDER BY id")
     columns = [col[0] for col in cursor.description]
@@ -681,7 +683,7 @@ def api_wip():
     try:
         import pandas as pd
 
-        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+        conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
         cursor = conn.cursor()
 
         # 工序顺序（从 site_station 表）
@@ -862,7 +864,7 @@ def api_search_wo():
         return jsonify({'success': False, 'error': '请输入工单号'})
 
     try:
-        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+        conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
         cursor = conn.cursor()
 
         # 用 LIKE 模糊匹配工单号（Job 字段），同时过滤 SiteRef
@@ -1015,7 +1017,7 @@ def api_hours_daily():
         daily_target = round(total_target / workdays_in_month, 2) if workdays_in_month > 0 else 0
 
         # ========== 从数据库获取当月每日完成工时 ==========
-        conn = pyodbc.connect(f"DSN={ODBC_DSN};UID={ODBC_UID};PWD={ODBC_PWD}", timeout=10)
+        conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
         cursor = conn.cursor()
 
         current_month = date.today().strftime('%Y-%m')
