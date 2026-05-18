@@ -561,11 +561,11 @@ def api_excel_jobs():
             station_hours_today[st] = round(station_hours_today.get(st, 0), 2)
         result['station_hours_today'] = station_hours_today
 
-        # ========== 销售统计 ==========
-        # 从数据库erp_data表计算当月总销售额
-        total_sales = float(df_this_month['sales_amount'].sum())
-        pending_sales = float(df_this_month[df_this_month['job_status_lower'] != '已完成']['sales_amount'].sum())
-        completed_sales = float(df_this_month[df_this_month['job_status_lower'] == '已完成']['sales_amount'].sum())
+        # ========== 销售统计（按 job 去重）==========
+        df_this_month_dedup = df_this_month.drop_duplicates(subset=['job'], keep='first')
+        total_sales = float(df_this_month_dedup['sales_amount'].sum())
+        pending_sales = float(df_this_month_dedup[df_this_month_dedup['job_status_lower'] != '已完成']['sales_amount'].sum())
+        completed_sales = float(df_this_month_dedup[df_this_month_dedup['job_status_lower'] == '已完成']['sales_amount'].sum())
 
         # 入库完成率
         ruku_completed_sales = completed_sales
@@ -579,21 +579,25 @@ def api_excel_jobs():
             'sales_completion_rate': sales_completion_rate,
         }
 
-        # ========== 组装工时（仅当月ship_date的工单）==========
+        # ========== 组装工时（仅当月ship_date的工单，按 job 去重）==========
         # 逻辑：工单数 × 单根时间（cycle_time_h）
         def calc_asm_hours(df_jobs):
             total_hours, job_count = 0, 0
+            seen_jobs = set()
             for _, row in df_jobs.iterrows():
                 job = str(row['job']).strip()
+                if job in seen_jobs:
+                    continue  # 跳过重复的 job 记录
+                seen_jobs.add(job)
                 ct = float(row['cycle_time_h']) if pd.notna(row['cycle_time_h']) else 0.0
                 qty = int(row['qty']) if pd.notna(row['qty']) else 0
                 total_hours += qty * ct
                 job_count += 1
             return round(total_hours, 2), job_count
 
-        # ★ 修改：只统计ship_date在当前月份的工单
-        pending_asm_df = df_this_month[(df_this_month['job_status_lower'] != '已完成')]
-        completed_asm_df = df_this_month[df_this_month['job_status_lower'] == '已完成']
+        # 仅当月ship日期工单（去重后的）
+        pending_asm_df = df_this_month_dedup[(df_this_month_dedup['job_status_lower'] != '已完成')]
+        completed_asm_df = df_this_month_dedup[df_this_month_dedup['job_status_lower'] == '已完成']
 
         pending_asm_hours, pending_asm_count = calc_asm_hours(pending_asm_df)
         completed_asm_hours, completed_asm_count = calc_asm_hours(completed_asm_df)
@@ -979,6 +983,8 @@ def api_hours_daily():
         df_erp = get_erp_schedule()
         now_month_daily = date.today().strftime('%Y-%m')
         df_this_month_daily = df_erp[df_erp['_month'] == now_month_daily]
+        # ★ 按 job 去重，避免重复记录导致目标工时翻倍
+        df_this_month_daily_dedup = df_this_month_daily.drop_duplicates(subset=['job'], keep='first')
 
         def calc_total_hours_from_db(df_jobs):
             """使用数据库 qty × cycle_time_h 计算总工时（仅当月ship_date工单）"""
@@ -989,7 +995,7 @@ def api_hours_daily():
                 total += qty * ct
             return total
 
-        total_target = round(calc_total_hours_from_db(df_this_month_daily), 2)
+        total_target = round(calc_total_hours_from_db(df_this_month_daily_dedup), 2)
 
         # ========== 工作日判断 ==========
         HOLIDAYS_2026 = {
@@ -1027,7 +1033,7 @@ def api_hours_daily():
         current_month = date.today().strftime('%Y-%m')
         cursor.execute(
             "SELECT Job, Station, CompleteDate FROM production_records "
-            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND CompleteDate IS NOT NULL AND CompleteDate LIKE ?",
+            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND CompleteDate IS NOT NULL AND CompleteDate LIKE %s",
             (current_month + '%',)
         )
         rows = cursor.fetchall()
