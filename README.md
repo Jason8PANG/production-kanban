@@ -11,19 +11,112 @@ HMLV生产实时看板系统，用于 310 站点 WIP 后台数据管理和生产
 - 🔍 **工单查询**: 支持模糊搜索工单号，查看工序流转明细
 - 💰 **销售统计**: 按工序、按月统计销售金额
 
-## 快速部署
+### 快速部署
 
-### 前置条件
+#### 前置条件
 
 - Docker & Docker Compose
-- ODBC 数据源配置 (DSN: wiptrack)
-- Docker 网络: `public-net`
+- SQL Server 数据库网络可达
+- Linux 服务器需配置 ODBC 驱动
 
-### 创建 Docker 网络
+#### 1. 克隆代码
+
+```bash
+git clone https://github.com/Jason8PANG/production-kanban.git
+cd production-kanban
+```
+
+#### 2. 配置 ODBC 数据源 (Linux)
+
+在 Linux 服务器上安装 `unixodbc` 和 SQL Server 驱动：
+
+```bash
+sudo apt update
+sudo apt install -y unixodbc unixodbc-dev odbcinst1debian2 msodbcsql18
+```
+
+配置 ODBC 数据源 `wiptrack`，编辑 `/etc/odbc.ini`：
+
+```ini
+[wiptrack]
+Driver      = ODBC Driver 18 for SQL Server
+Server      = 你的数据库服务器IP,1433
+Database    = 你的数据库名
+Uid         = powerbi
+PWD         = !Q1234567
+Encrypt     = no
+TrustServerCertificate = yes
+```
+
+> **提示**: 数据库服务器 IP 和数据库名需要根据实际情况修改。如果数据库也在 Docker 网络中，可以使用容器名或主机名。
+
+#### 3. 创建 Docker 网络
 
 ```bash
 docker network create public-net
 ```
+
+#### 4. 启动服务
+
+```bash
+docker compose up -d --build
+```
+
+#### 5. 查看日志
+
+```bash
+docker compose logs -f hmlv-kanban
+
+### 安装步骤
+
+#### 1. 克隆代码
+
+```bash
+git clone https://github.com/Jason8PANG/production-kanban.git
+cd production-kanban
+```
+
+#### 2. 配置 ODBC 数据源（Linux）
+
+在 Linux 服务器上安装 `unixodbc` 和 SQL Server 驱动：
+
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install -y unixodbc unixodbc-dev odbcinst1debian2
+
+# 安装 SQL Server ODBC 驱动
+curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
+sudo apt update
+sudo ACCEPT_EULA=Y apt install -y msodbcsql18
+```
+
+配置 ODBC 数据源 `wiptrack`，编辑 `/etc/odbc.ini`：
+
+```ini
+[wiptrack]
+Driver      = ODBC Driver 18 for SQL Server
+Server      = 你的数据库服务器IP,1433
+Database    = 你的数据库名
+Uid         = powerbi
+PWD         = !Q1234567
+Encrypt     = no
+TrustServerCertificate = yes
+```
+
+#### 3. 启动服务
+
+```bash
+docker compose up -d --build
+```
+
+#### 4. 查看日志
+
+```bash
+docker compose logs -f hmlv-kanban
+```
+
 
 ### 启动服务
 
