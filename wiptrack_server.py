@@ -840,16 +840,18 @@ def api_wip():
                             wip_entry['exception'] = exc_by_job[job]
                         wip_list.append(wip_entry)
 
-            # 按滞留时间降序
-            wip_list.sort(key=lambda x: -x['dwell_hours'])
+            # 按滞留时间降序，异常工单置顶
+            exc_count = sum(1 for e in wip_list if 'exception' in e)
+            wip_list.sort(key=lambda x: (-(1 if 'exception' in x else 0), -x['dwell_hours']))
 
             # ★ 调试：打印各工序统计
-            print(f"[DEBUG] {station_en} ({station_cn}): done_in_month={done_in_month}, wip_count={len(wip_list)}")
+            print(f"[DEBUG] {station_en} ({station_cn}): done_in_month={done_in_month}, wip_count={len(wip_list)}, exc_count={exc_count}")
 
             result[station_en] = {
                 'label': station_cn,
                 'count': len(wip_list),  # 5月滞留数
-'done_in_month': done_in_month,      # 当月完成数（新增）
+                'done_in_month': done_in_month,      # 当月完成数（新增）
+                'exception_count': exc_count,         # 异常工单数（新增）
                 'jobs': wip_list
             }
 

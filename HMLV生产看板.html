@@ -381,6 +381,16 @@ canvas { display: block; background: transparent; }
   </div>
 </div>
 
+<div id="excModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99999;align-items:center;justify-content:center;">
+  <div style="background:#1e293b;border:1px solid #dc2626;border-radius:8px;width:480px;max-width:92vw;max-height:70vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.5);">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #dc262640;background:#7f1d1d;border-radius:8px 8px 0 0;">
+      <span style="color:#fca5a5;font-size:14px;font-weight:700;">异常详情</span>
+      <button onclick="closeExcModal()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
+    </div>
+    <div id="excModalBody" style="padding:16px; color:#e2e8f0; font-size:13px; line-height:1.8;"></div>
+  </div>
+</div>
+
   <!-- KPI Cards Row (4 cards) -->
   <div id="kpiCardsRow" style="display:flex;gap:6px;flex-shrink:0;">
     <div class="section kpi-card" style="flex:1;border-color:rgba(167,139,250,0.4);color:#a78bfa;">
@@ -772,7 +782,10 @@ function loadWIP() {
   fetch('/api/wip?t=' + Date.now())
     .then(r => r.json())
     .then(json => {
-      if (json.success) renderWIP(json.data);
+      if (json.success) {
+        window._wipData = json.data;
+        renderWIP(json.data);
+      }
     })
     .catch(e => console.error('WIP数据加载失败:', e));
 }
@@ -781,6 +794,9 @@ function renderWIP(data) {
   const container = document.getElementById('wipContainer');
   if (!container) return;
   container.innerHTML = '';
+
+  // 构建全局异常数据映射（按job查找）
+  window._excData = {};
 
   const displayStations = ['Cut','Pre','Asm','Test','Pack'];
   displayStations.forEach(st => {
@@ -818,6 +834,9 @@ function renderWIP(data) {
       return aExc - bExc;
     });
     sortedJobs.forEach(j => {
+      const isExc = j.exception && j.exception.length > 0;
+      // 存储异常数据，供点击事件查找
+      if (isExc) window._excData[j.job] = j.exception;
       let cls = 'ok';
       if (j.dwell_hours > 48) cls = 'warn';
       else if (j.dwell_hours > 24) cls = 'mid';
@@ -825,28 +844,20 @@ function renderWIP(data) {
         ? (j.dwell_hours / 24).toFixed(1) + '天'
         : j.dwell_hours.toFixed(1) + 'H';
       const itemText = j.item || '';
-      const lineText = j.line || '';
-      const isExc = j.exception && j.exception.length > 0;
       const isTransferred = j.transferred;
-      let excDesc = '';
-      if (isExc) {
-        excDesc = j.exception.map(function(e) { return e.station + ': ' + e.description; }).join('; ');
-      }
-      const excTitle = isExc ? ' [异常] ' + excDesc : '';
-      let rowStyle = isExc ? 'background:#451a1a;border-left:3px solid #f87171;' : '';
+      let rowStyle = isExc ? 'background:#7f1d1d;' : '';
       if (isTransferred) rowStyle += 'opacity:0.85;';
-      const excTag = isExc ? '<span style="color:#f87171;font-size:11px;margin-left:4px;" title="' + escHtml(excDesc) + '">\u26a0</span>' : '';
-      const transTag = isTransferred ? '<span style="color:#fbbf24;font-size:10px;margin-left:2px;" title="已流转到下游工序">\u2192</span>' : '';
-      const dwellColor = isExc ? 'color:#f87171;' : '';
+      const dwellColor = isExc ? 'color:#fca5a5;' : (cls === 'warn' ? 'color:#f87171;' : cls === 'mid' ? 'color:#fbbf24;' : 'color:#4ade80;');
       const dwellText = isTransferred ? '已流转' : dwellStr;
-      const tooltip = (escHtml(j.job) || '无') + '\nItem: ' + (itemText || '无') + '\nLine: ' + (lineText || '无') + '\n完成时间: ' + escHtml(j.complete_time) + escHtml(excTitle);
-      rowsHtml += '<div class="wip-row" style="' + rowStyle + '" title="' + tooltip + '"><span class="wip-col-job">' + escHtml(j.job) + excTag + transTag + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(lineText) + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
+      const excBtn = isExc ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">异常</span>' : '';
+      rowsHtml += '<div class="wip-row" style="' + rowStyle + '"><span class="wip-col-job" style="' + (isExc ? 'color:#fca5a5;' : '') + '">' + escHtml(j.job) + excBtn + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(j.line || '') + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
     });
 
     card.innerHTML = `
       <div class="wip-card-header" style="background:${color}15;color:${color};font-weight:600;">
         <span>${STATION_CN[st] || st}</span>
         <span style="background:${color}30;color:${color};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">${count}</span>
+        ${(stData.exception_count || 0) > 0 ? '<span style="background:#dc2626;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">异常' + stData.exception_count + '</span>' : ''}
       </div>
       <div class="wip-card-body">
         <div class="wip-table-header">
@@ -929,11 +940,56 @@ function closeWOModal() {
   document.getElementById('woModal').style.display = 'none';
 }
 
+function closeExcModal() {
+  document.getElementById('excModal').style.display = 'none';
+}
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('woModal').addEventListener('click', function(e) {
     if (e.target === this) closeWOModal();
   });
+  document.getElementById('excModal').addEventListener('click', function(e) {
+    if (e.target === this) closeExcModal();
+  });
+  // 异常标签点击委托
+  document.addEventListener('click', function(e) {
+    var tag = e.target.closest('.exc-tag');
+    if (tag) {
+      var job = tag.getAttribute('data-job');
+      if (job) showExcModal(job);
+    }
+  });
 });
+
+function showExcModal(job) {
+  var excList = window._excData[job] || [];
+  var jobData = null;
+  var stations = ['Cut','Pre','Asm','Test','Pack'];
+  for (var s = 0; s < stations.length; s++) {
+    var stData = window._wipData[stations[s]];
+    if (!stData || !stData.jobs) continue;
+    for (var i = 0; i < stData.jobs.length; i++) {
+      if (stData.jobs[i].job === job) { jobData = stData.jobs[i]; break; }
+    }
+    if (jobData) break;
+  }
+  var itemText = jobData ? (jobData.item || '') : '';
+  var lineText = jobData ? (jobData.line || '') : '';
+  var body = document.getElementById('excModalBody');
+  var html = '<div style="margin-bottom:12px;padding:10px;background:#0f172a;border-radius:6px;border-left:3px solid #dc2626;">';
+  html += '<div style="color:#e2e8f0;font-weight:700;font-size:15px;margin-bottom:6px;">' + escHtml(job) + '</div>';
+  html += '<div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">Item: ' + escHtml(itemText || '无') + ' &nbsp;|&nbsp; Line: ' + escHtml(lineText || '无') + '</div>';
+  html += '</div>';
+  excList.forEach(function(e, idx) {
+    html += '<div style="padding:10px;background:#7f1d1d22;border-radius:6px;margin-bottom:8px;border-left:3px solid #dc2626;">';
+    html += '<div style="color:#fca5a5;font-weight:600;margin-bottom:6px;">\u26a0 异常 ' + (idx + 1) + '</div>';
+    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">工位</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
+    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">描述</span><span style="color:#fca5a5;">' + escHtml(e.description) + '</span></div>';
+    html += '<div><span style="color:#94a3b8;display:inline-block;width:70px;">开始时间</span><span style="color:#e2e8f0;">' + escHtml(e.start_time) + '</span></div>';
+    html += '</div>';
+  });
+  body.innerHTML = html;
+  document.getElementById('excModal').style.display = 'flex';
+}
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
