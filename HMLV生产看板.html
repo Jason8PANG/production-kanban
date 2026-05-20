@@ -111,7 +111,7 @@ select:hover { border-color: #64748b; }
   background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
   border: 1px solid rgba(51, 65, 85, 0.6);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 .section-header {
@@ -237,11 +237,12 @@ canvas { display: block; background: transparent; }
   border-radius: 8px;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  height: 380px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   transition: border-color 0.2s;
+  clip-path: inset(0 round 8px);
 }
 .wip-card:hover { border-color: rgba(71, 85, 105, 0.8); }
 .wip-card-header {
@@ -262,13 +263,32 @@ canvas { display: block; background: transparent; }
 .wip-card-body::-webkit-scrollbar { width: 3px; }
 .wip-card-body::-webkit-scrollbar-track { background: transparent; }
 .wip-card-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+.wip-row {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.4);
+  gap: 4px;
+  transition: background 0.15s;
+  font-size: 8px;
+  min-height: 19px;
+}
+.wip-row:hover { background: rgba(30, 41, 59, 0.6); }
+.wip-row:last-child { border-bottom: none; }
+.wip-col-job { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 4 1 0; min-width: 70px; max-width: 180px; text-align: center; font-size: 9px; }
+.wip-col-item { color: #94a3b8; flex: 2 1 0; min-width: 35px; max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 9px; }
+.wip-dwell { font-weight: 600; white-space: nowrap; flex: 0 0 auto; min-width: 45px; text-align: center; font-size: 9px; }
+.wip-dwell.warn { color: #f87171; }
+.wip-dwell.ok { color: #4ade80; }
+.wip-dwell.mid { color: #fbbf24; }
+
 .wip-table-header {
   display: flex;
   align-items: center;
-  padding: 3px 10px;
+  padding: 2px 8px;
   gap: 4px;
   color: #475569;
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 600;
   border-bottom: 1px solid rgba(51, 65, 85, 0.4);
   text-transform: uppercase;
@@ -280,30 +300,18 @@ canvas { display: block; background: transparent; }
 .wip-row .wip-col-item { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
 .wip-table-header .wip-col-line,
 .wip-row .wip-col-line { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
-.wip-col-line { color: #a78bfa; font-size: 8px; white-space: nowrap; flex: 1 1 0; min-width: 28px; text-align: center; }
-.wip-row {
-  display: flex;
-  align-items: center;
-  padding: 3px 10px;
-  border-bottom: 1px solid rgba(30, 41, 59, 0.4);
-  gap: 4px;
-  transition: background 0.15s;
-  font-size: 9px;
-  min-height: 22px;
-}
-.wip-row:hover { background: rgba(30, 41, 59, 0.6); }
-.wip-row:last-child { border-bottom: none; }
-.wip-col-job { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 3 1 0; min-width: 60px; max-width: 120px; text-align: center; font-size: 10px; }
-.wip-col-item { color: #94a3b8; flex: 2 1 0; min-width: 40px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 10px; }
-.wip-dwell { font-weight: 600; white-space: nowrap; flex: 0 0 auto; min-width: 50px; text-align: center; font-size: 10px; }
-.wip-dwell.warn { color: #f87171; }
-.wip-dwell.ok { color: #4ade80; }
-.wip-dwell.mid { color: #fbbf24; }
+.wip-col-line { color: #a78bfa; font-size: 7px; white-space: nowrap; flex: 1 1 0; min-width: 24px; text-align: center; }
 
 /* KPI Card Glow */
 .kpi-card {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70px;
+  padding: 6px 8px;
 }
 .kpi-card::before {
   content: '';
@@ -315,6 +323,18 @@ canvas { display: block; background: transparent; }
   height: 1px;
   background: linear-gradient(90deg, transparent, currentColor, transparent);
   opacity: 0.3;
+}
+.kpi-card .kpi-title {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  letter-spacing: 1px;
+  text-align: center;
+}
+.kpi-card .kpi-value {
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
@@ -361,52 +381,49 @@ canvas { display: block; background: transparent; }
   </div>
 </div>
 
-<div class="main">
+  <!-- KPI Cards Row (4 cards) -->
+  <div id="kpiCardsRow" style="display:flex;gap:6px;flex-shrink:0;">
+    <div class="section kpi-card" style="flex:1;border-color:rgba(167,139,250,0.4);color:#a78bfa;">
+      <div class="kpi-title" style="color:#a78bfa;">当月目标销售</div>
+      <div class="kpi-value" style="color:#a78bfa;" id="targetSalesValue">-</div>
+    </div>
+    <div class="section kpi-card" style="flex:1;border-color:rgba(34,211,238,0.4);color:#22d3ee;">
+      <div class="kpi-title" style="color:#22d3ee;">当月释放工单销售</div>
+      <div class="kpi-value" style="color:#22d3ee;" id="totalSalesDisplay">-</div>
+    </div>
+    <div class="section kpi-card" style="flex:1;border-color:rgba(56,189,248,0.4);color:#38bdf8;">
+      <div class="kpi-title" style="color:#38bdf8;">当月已释放工单数量</div>
+      <div class="kpi-value" style="color:#38bdf8;" id="totalJobsDisplay">-</div>
+    </div>
+    <div class="section kpi-card" style="flex:1;border-color:rgba(251,146,60,0.4);color:#fb923c;">
+      <div class="kpi-title" style="color:#fb923c;">已释放工单总工时</div>
+      <div class="kpi-value" style="color:#fb923c;" id="totalAsmHoursDisplay">-</div>
+    </div>
+  </div>
 
-  <!-- Station Progress -->
-  <div class="section">
+  <!-- Station Progress (table only, no inline metrics) -->
+  <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column;">
     <div class="section-header">
       <span style="min-width:60px"></span>
       <span style="font-size:17px;font-weight:700">工序完成进度</span>
       <span style="min-width:60px"></span>
     </div>
-    <div class="section-body" style="padding:8px 8px;">
+    <div class="section-body" style="padding:8px 8px;flex:1;min-height:0;overflow-y:auto;">
       <table class="station-table" id="stationTable">
           <colgroup>
             <col style="width:8%">
             <col class="divider-col">
+            <col style="width:16%">
             <col style="width:14%">
-            <col style="width:11%">
             <col class="divider-col">
+            <col style="width:16%">
             <col style="width:14%">
-            <col style="width:11%">
             <col class="divider-col">
             <col style="width:5%">
             <col style="width:7%">
             <col style="width:18%">
           </colgroup>
         <thead>
-          <tr>
-            <th style="border-bottom:none;"></th>
-            <th class="divider-cell" style="border-bottom:none;"></th>
-            <th colspan="2" style="padding:8px 0 6px;text-transform:none;letter-spacing:0;font-size:11px;border-bottom:none;text-align:center;">
-              <span style="color:#94a3b8;font-size:13px;font-weight:700;letter-spacing:1px;">当月释放工单销售</span><br>
-              <span style="color:#22d3ee;font-size:19px;font-weight:700;" id="totalSalesDisplay">-</span>
-            </th>
-            <th class="divider-cell" style="border-bottom:none;"></th>
-            <th colspan="2" style="padding:8px 0 6px;text-transform:none;letter-spacing:0;font-size:11px;border-bottom:none;text-align:center;">
-              <span style="color:#94a3b8;font-size:13px;font-weight:700;letter-spacing:1px;">当月已释放工单数量</span><br>
-              <span style="color:#38bdf8;font-size:19px;font-weight:700;" id="totalJobsDisplay">-</span>
-            </th>
-            <th class="divider-cell" style="border-bottom:none;"></th>
-            <th colspan="3" style="padding:8px 0 6px;text-transform:none;letter-spacing:0;font-size:11px;border-bottom:none;text-align:center;">
-              <span style="color:#94a3b8;font-size:13px;font-weight:700;letter-spacing:1px;">已释放工单总工时</span><br>
-              <span style="color:#fb923c;font-size:19px;font-weight:700;" id="totalAsmHoursDisplay">-</span>
-            </th>
-          </tr>
-          <tr>
-            <th colspan="11" style="padding:0;border-bottom:none;"><div style="height:1px;background:linear-gradient(90deg,transparent,rgba(56,189,248,0.25),transparent);"></div></th>
-          </tr>
           <tr>
             <th>工序</th>
             <th class="divider-cell has-line"></th>
@@ -454,6 +471,8 @@ const STATION_LIST = ['Print','Cut','Pre','Asm','Bundle','Test','Pack'];
 const DISPLAY_STATIONS = ['Cut','Pre','Asm','Test','Pack'];
 
 let totalJobCount = 1;
+let excelJobsReady = false;  // 标记 excel_jobs 数据是否已加载
+let pendingRenderAll = null; // 缓存 /api/data 返回的 json，等待 excel_jobs 就绪后渲染
 
 // ========== Auto Refresh ==========
 let autoTimer = null;
@@ -465,7 +484,13 @@ function loadData() {
   fetch('/api/data?t=' + Date.now())
     .then(r => r.json())
     .then(json => {
-      renderAll(json);
+      if (excelJobsReady) {
+        // excel_jobs 已就绪，直接渲染
+        renderAll(json);
+      } else {
+        // excel_jobs 还没返回，缓存起来等待
+        pendingRenderAll = json;
+      }
     })
     .catch(e => {
       document.querySelector('.main').innerHTML = '<div style="background:#7f1d1d;border:1px solid #b91c1c;border-radius:8px;padding:20px;margin:20px;color:#fca5a5">加载失败: ' + e.message + '</div>';
@@ -512,17 +537,30 @@ function loadExcelJobs() {
         if (json.data && json.data.workdays_in_month) {
           window._workdaysInMonth = json.data.workdays_in_month;
         }
+
+        // 标记 excel_jobs 数据已就绪
+        excelJobsReady = true;
+
         renderExcelCards(json.data);
         renderSalesCards(json.data);
         renderAsmHoursDisplay(json.data);
-        // 销售/工时数据就绪后，重新渲染工序表（修复异步竞态导致销售为0的问题）
-        if (_apiJson) {
-          renderAll(_apiJson);
+        renderSalesTarget();  // 销售数据就绪后渲染目标卡片
+
+        // 如果有缓存的 /api/data 数据，现在渲染工序表
+        if (pendingRenderAll) {
+          renderAll(pendingRenderAll);
+          pendingRenderAll = null;
         }
       }
     })
     .catch(e => {
       console.error('Excel数据加载失败:', e);
+      // 即使 excel_jobs 失败也标记就绪，避免永久阻塞
+      excelJobsReady = true;
+      if (pendingRenderAll) {
+        renderAll(pendingRenderAll);
+        pendingRenderAll = null;
+      }
     });
 }
 
@@ -538,21 +576,15 @@ function renderExcelCards(data) {
   }
 
   const c = data.current_month;
-  const total = c.total;
-
-  // 显示总工单数
-  document.getElementById('totalJobsDisplay').textContent = total;
+  document.getElementById('totalJobsDisplay').textContent = c.total;
 }
 
 function renderSalesCards(data) {
   if (!data || !data.sales) {
     return;
   }
-
   const s = data.sales;
   const totalSales = s.total_sales || 0;
-
-  // 显示总销售额
   const fmt = (n) => '$' + Math.round(n).toLocaleString('en-US');
   document.getElementById('totalSalesDisplay').textContent = fmt(totalSales);
 }
@@ -568,10 +600,32 @@ function renderAsmHoursDisplay(data) {
   if (asmDisplay) asmDisplay.textContent = totalHours.toFixed(2) + ' H';
 }
 
+// ========== 当月目标销售卡片 ==========
+function loadSalesTarget() {
+  fetch('/api/sales-target?t=' + Date.now())
+    .then(r => r.json())
+    .then(json => {
+      if (json.success) {
+        window._salesTarget = json.target || 0;
+        // 销售目标就绪后，如果已有销售数据就渲染
+        if (window._salesData) {
+          renderSalesTarget();
+        }
+      }
+    })
+    .catch(e => console.error('销售目标加载失败:', e));
+}
+
+function renderSalesTarget() {
+  const target = window._salesTarget || 0;
+  document.getElementById('targetSalesValue').textContent = '$' + Math.round(target).toLocaleString('en-US');
+}
+
 function manualRefresh() {
   loadData();
   loadExcelJobs();
   loadWIP();
+  loadSalesTarget();
 }
 
 function resetCountdown() {
@@ -900,6 +954,7 @@ updateClock();
 loadData();
 loadExcelJobs();
 loadWIP();
+loadSalesTarget();
 startAutoRefresh(300);
 </script>
 </body>

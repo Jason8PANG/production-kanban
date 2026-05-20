@@ -974,30 +974,38 @@ SALES_TARGET_FILE = os.environ.get('SALES_TARGET_FILE', r'I:/Production/01 Cor&F
 
 @app.route('/api/sales-target')
 def api_sales_target():
-    """从Excel读取销售目标数据"""
+    """从数据库读取销售目标数据"""
     try:
-        import pandas as pd
-        df = pd.read_excel(SALES_TARGET_FILE)
-        # 解析日期格式 "2026.5" -> "2026-05"（补零对齐）
-        def normalize_month(val):
-            s = str(val).strip().replace('.', '-')
-            parts = s.split('-')
-            if len(parts) == 2:
-                return parts[0] + '-' + parts[1].zfill(2)
-            return s
-        df['日期_str'] = df['日期'].apply(normalize_month)
-        # 查找当月
         now_month = date.today().strftime('%Y-%m')
-        target_row = df[df['日期_str'] == now_month]
-        if len(target_row) > 0:
-            target_value = float(target_row.iloc[0]['销售'])
-        else:
-            target_value = 0.0
+        
+        # 连接 erp_data 数据库读取销售目标
+        conn_erp = pymysql.connect(
+            host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, 
+            password=MYSQL_PASSWORD, database='erp_data', 
+            charset='utf8mb4', connect_timeout=10
+        )
+        cursor = conn_erp.cursor()
+        
+        # 从数据库读取所有月度目标
+        cursor.execute('SELECT target_month, target_amount FROM hmlv_sales_target ORDER BY target_month')
+        rows = cursor.fetchall()
+        all_targets = [{'month': r[0], 'target': float(r[1])} for r in rows]
+        
+        # 查找当月目标
+        target_value = 0.0
+        for r in rows:
+            if r[0] == now_month:
+                target_value = float(r[1])
+                break
+        
+        cursor.close()
+        conn_erp.close()
+        
         return jsonify({
             'success': True,
             'month': now_month,
             'target': target_value,
-            'all_targets': df[['日期_str', '销售']].rename(columns={'日期_str': 'month', '销售': 'target'}).to_dict('records')
+            'all_targets': all_targets
         })
     except Exception as e:
         import traceback
