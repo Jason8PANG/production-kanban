@@ -127,6 +127,34 @@ def parse_complete_date(val):
     return None
 
 
+def get_pack_completed_jobs(month=None):
+    """
+    从 production_records 表中获取已完成最后一道工序（包装 Package）的工单集合。
+    month: 格式 'YYYY-MM'，不传则返回所有月份的。
+    返回: set of job strings
+    """
+    conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
+    cursor = conn.cursor()
+    if month:
+        cursor.execute("""
+            SELECT DISTINCT pr.Job
+            FROM production_records pr
+            WHERE pr.Station = '包装 Package'
+              AND pr.SiteRef = 'NAIGROUP_PROD_310'
+              AND DATE_FORMAT(pr.CompleteDate, %s) = %s
+        """, ('%Y-%m', month))
+    else:
+        cursor.execute("""
+            SELECT DISTINCT pr.Job
+            FROM production_records pr
+            WHERE pr.Station = '包装 Package'
+              AND pr.SiteRef = 'NAIGROUP_PROD_310'
+        """)
+    jobs = {str(row[0]).strip().upper() for row in cursor.fetchall()}
+    conn.close()
+    return jobs
+
+
 def get_erp_schedule():
     """从 erp_data.hmlv_production_schedule 表读取排程数据"""
     import pandas as pd
@@ -151,6 +179,8 @@ def get_erp_schedule():
         data.append(row_dict)
     
     df = pd.DataFrame(data)
+    # 统一 job 列为大写，避免大小写不匹配
+    df['job'] = df['job'].astype(str).str.strip().str.upper()
     df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
     df['tested_qty'] = pd.to_numeric(df['tested_qty'], errors='coerce').fillna(0).astype(int)
     df['wo_total'] = pd.to_numeric(df['wo_total'], errors='coerce').fillna(0).astype(int)
@@ -192,6 +222,18 @@ def get_data():
             sv = str(row.get(station_col_name, '') or '').strip()
             if sv in STATION_CN_TO_KEY:
                 row[station_col_name] = STATION_CN_TO_KEY[sv]
+
+    # 统一 Job 列为大写，避免大小写不匹配
+    job_col_name = None
+    for col in columns:
+        if 'job' in col.lower():
+            job_col_name = col
+            break
+    if job_col_name:
+        for row in rows:
+            val = row.get(job_col_name)
+            if val is not None:
+                row[job_col_name] = str(val).strip().upper()
 
     return columns, rows
 
@@ -409,13 +451,12 @@ def api_excel_jobs():
         df_all = get_erp_schedule()
         now_month = date.today().strftime('%Y-%m')
 
-        # 处理 job_status 字段（可能有大小写问题）
-        df_all['job_status'] = df_all['job_status'].fillna('').astype(str).str.strip()
-        # 统一大小写
-        df_all['job_status_lower'] = df_all['job_status'].str.lower()
-
         # 当月数据
         df_this = df_all[df_all['_month'] == now_month]
+
+        # ========== 获取当月已完成（包装Package完成）的工单集合 ==========
+        pack_completed_all = get_pack_completed_jobs()  # 所有月份
+        pack_completed_this_month = get_pack_completed_jobs(now_month)  # 当月
 
         result = {}
 
@@ -426,8 +467,8 @@ def api_excel_jobs():
             'by_month': {str(k): int(v) for k, v in df_all.groupby('_month')['job'].nunique().items()}
         }
 
-        # ========== 入库记录统计（job_status='已完成'的工单）==========
-        completed_df = df_all[df_all['job_status_lower'] == '已完成']
+        # ========== 入库记录统计（production_records中完成Package的工单）==========
+        completed_df = df_all[df_all['job'].str.strip().isin(pack_completed_all)]
         result['ruku'] = {
             'label': '入库记录',
             'total': int(completed_df['job'].nunique()),
@@ -507,10 +548,10 @@ def api_excel_jobs():
 
         # ========== 当前月份统计 ==========
         # 当月工单总数 = 所有 ship_date 在当月的 JOB（不管完成还是未完成）
-        
-        # 已完成：ship_date在当月 且 job_status='已完成'
-        completed_jobs = set(completed_df[completed_df['_month'] == now_month]['job'].dropna().astype(str).str.strip().unique())
-        # 未完成：ship_date在当月 且 job_status!='已完成'
+
+        # 已完成：ship_date在当月 且 production_records中完成了Package工序
+        completed_jobs = all_month_jobs & pack_completed_this_month
+        # 未完成：ship_date在当月 且 未完成Package工序
         pending_jobs = all_month_jobs - completed_jobs
 
         result['current_month'] = {
@@ -558,8 +599,10 @@ def api_excel_jobs():
         # ========== 销售统计（按 job 去重）==========
         df_this_month_dedup = df_this_month.drop_duplicates(subset=['job'], keep='first')
         total_sales = float(df_this_month_dedup['sales_amount'].sum())
-        pending_sales = float(df_this_month_dedup[df_this_month_dedup['job_status_lower'] != '已完成']['sales_amount'].sum())
-        completed_sales = float(df_this_month_dedup[df_this_month_dedup['job_status_lower'] == '已完成']['sales_amount'].sum())
+        # 用 pack_completed 判断，不再依赖 job_status
+        completed_mask = df_this_month_dedup['job'].str.strip().isin(pack_completed_this_month)
+        pending_sales = float(df_this_month_dedup[~completed_mask]['sales_amount'].sum())
+        completed_sales = float(df_this_month_dedup[completed_mask]['sales_amount'].sum())
 
         # 入库完成率
         ruku_completed_sales = completed_sales
@@ -576,31 +619,58 @@ def api_excel_jobs():
         # ========== 组装工时（仅当月ship_date的工单，按 job 去重）==========
         # 逻辑：总工时 = qty × cycle_time_h（工单数量 × 单根时间）
         # ★★★ 直接用 SQL 计算，避免 DataFrame Python 处理的不一致问题 ★★★
+        # ★★★ "已完成"判断改为 production_records 中完成 Package 工序的工单 ★★★
         conn_hours = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
         cursor_hours = conn_hours.cursor()
 
-        # 已完成工时：job_status='已完成' 且 ship_date 在当月（使用参数化查询避免%%转义问题）
+        # 已完成工时：production_records 中完成 Package 且 ship_date 在当月
         cursor_hours.execute("""
-            SELECT SUM(qty * cycle_time_h) FROM erp_data.hmlv_production_schedule
-            WHERE job_status = %s AND DATE_FORMAT(ship_date, %s) = %s
-        """, ('已完成', '%Y-%m', now_month))
+            SELECT SUM(ps.qty * ps.cycle_time_h)
+            FROM erp_data.hmlv_production_schedule ps
+            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+              AND ps.job COLLATE utf8mb4_unicode_ci IN (
+                  SELECT DISTINCT pr.Job FROM production_records pr
+                  WHERE pr.Station = '包装 Package'
+                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+                    AND DATE_FORMAT(pr.CompleteDate, %s) = %s
+              )
+        """, ('%Y-%m', now_month, '%Y-%m', now_month))
         completed_asm_hours = round(float(cursor_hours.fetchone()[0] or 0), 2)
         cursor_hours.execute("""
-            SELECT COUNT(DISTINCT job) FROM erp_data.hmlv_production_schedule
-            WHERE job_status = %s AND DATE_FORMAT(ship_date, %s) = %s
-        """, ('已完成', '%Y-%m', now_month))
+            SELECT COUNT(DISTINCT ps.job)
+            FROM erp_data.hmlv_production_schedule ps
+            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+              AND ps.job COLLATE utf8mb4_unicode_ci IN (
+                  SELECT DISTINCT pr.Job FROM production_records pr
+                  WHERE pr.Station = '包装 Package'
+                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+                    AND DATE_FORMAT(pr.CompleteDate, %s) = %s
+              )
+        """, ('%Y-%m', now_month, '%Y-%m', now_month))
         completed_asm_count = cursor_hours.fetchone()[0] or 0
 
-        # 未完成工时：job_status!='已完成' 且 ship_date 在当月
+        # 未完成工时：ship_date在当月 且 未完成 Package
         cursor_hours.execute("""
-            SELECT SUM(qty * cycle_time_h) FROM erp_data.hmlv_production_schedule
-            WHERE job_status != %s AND DATE_FORMAT(ship_date, %s) = %s
-        """, ('已完成', '%Y-%m', now_month))
+            SELECT SUM(ps.qty * ps.cycle_time_h)
+            FROM erp_data.hmlv_production_schedule ps
+            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+              AND ps.job COLLATE utf8mb4_unicode_ci NOT IN (
+                  SELECT DISTINCT pr.Job FROM production_records pr
+                  WHERE pr.Station = '包装 Package'
+                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+              )
+        """, ('%Y-%m', now_month))
         pending_asm_hours = round(float(cursor_hours.fetchone()[0] or 0), 2)
         cursor_hours.execute("""
-            SELECT COUNT(DISTINCT job) FROM erp_data.hmlv_production_schedule
-            WHERE job_status != %s AND DATE_FORMAT(ship_date, %s) = %s
-        """, ('已完成', '%Y-%m', now_month))
+            SELECT COUNT(DISTINCT ps.job)
+            FROM erp_data.hmlv_production_schedule ps
+            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+              AND ps.job COLLATE utf8mb4_unicode_ci NOT IN (
+                  SELECT DISTINCT pr.Job FROM production_records pr
+                  WHERE pr.Station = '包装 Package'
+                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+              )
+        """, ('%Y-%m', now_month))
         pending_asm_count = cursor_hours.fetchone()[0] or 0
 
         print(f"[DEBUG] SQL工时: completed={completed_asm_hours}h({completed_asm_count}个), pending={pending_asm_hours}h({pending_asm_count}个), total={round(completed_asm_hours + pending_asm_hours, 2)}h")
@@ -715,7 +785,7 @@ def api_wip():
         # 同时将数据库中的 Station 值（可能是"中文+英文"混合格式）转为标准英文 key
         job_station_time = {}
         for row in rows:
-            job = str(row[0]).strip()
+            job = str(row[0]).strip().upper()
             station_raw = str(row[1]).strip()
             # 转为标准英文 key（先查映射表，找不到时尝试提取英文部分）
             station_en = STATION_CN_TO_KEY.get(station_raw, '')
@@ -765,7 +835,7 @@ def api_wip():
             )
             exc_rows = cursor.fetchall()
             for er in exc_rows:
-                exc_job = str(er[1]).strip()
+                exc_job = str(er[1]).strip().upper()
                 exc_station = str(er[0]).strip()
                 exc_desc = str(er[2]).strip() if er[2] else ''
                 exc_start = parse_complete_date(er[3])
@@ -870,7 +940,7 @@ def api_search_wo():
     返回: 该工单在各工序的完成情况及当前所处阶段
     """
     from flask import request as flask_request
-    q = (flask_request.args.get('q') or '').strip()
+    q = (flask_request.args.get('q') or '').strip().upper()
     if not q:
         return jsonify({'success': False, 'error': '请输入工单号'})
 
@@ -908,7 +978,7 @@ def api_search_wo():
         # 按工单号归组，记录每道工序的完成时间
         job_map = {}
         for row in rows:
-            job = str(row[0]).strip()
+            job = str(row[0]).strip().upper()
             station_raw = str(row[1]).strip()
             complete_dt = parse_complete_date(row[2])  # 使用全局函数解析（支持 AM/PM）
             # 统一 station key
@@ -1103,7 +1173,7 @@ def api_hours_daily():
         # 工时 = qty × cycle_time_h（单根时间 × 工单数），不去重
         daily_completed = {}  # date_str -> hours
         for row in rows:
-            job = str(row[0]).strip()
+            job = str(row[0]).strip().upper()
             cd = parse_complete_date(row[2])
             if not cd:
                 continue
