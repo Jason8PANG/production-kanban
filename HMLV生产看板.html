@@ -116,7 +116,7 @@ select:hover { border-color: #64748b; }
 }
 .section-header {
   background: rgba(15, 23, 42, 0.8);
-  padding: 4px 12px;
+  padding: 2px 12px;
   font-size: 12px;
   font-weight: 600;
   color: #38bdf8;
@@ -124,7 +124,7 @@ select:hover { border-color: #64748b; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  height: 28px;
+  height: 24px;
 }
 .section-body { padding: 6px 10px; }
 
@@ -136,16 +136,16 @@ select:hover { border-color: #64748b; }
 }
 .station-table th {
   text-align: left;
-  padding: 7px 9px;
+  padding: 4px 6px;
   color: #64748b;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 1px;
   border-bottom: 1px solid rgba(51, 65, 85, 0.6);
   text-transform: uppercase;
 }
 .station-table td {
-  padding: 8px 9px;
+  padding: 4px 6px;
   border-bottom: 1px solid rgba(30, 41, 59, 0.6);
   vertical-align: middle;
 }
@@ -401,7 +401,7 @@ canvas { display: block; background: transparent; }
     <div style="flex:1;flex-shrink:0;"></div>
 
     <!-- ===== Card 1: 销售 ===== -->
-    <div class="section" style="flex:14; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
+    <div class="section" style="flex:20; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
       <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
         <div style="font-size:15px; color:#a78bfa;">目标销售：<span id="targetSalesValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
         <div style="font-size:15px; color:#a78bfa;">完成率：<span id="salesCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
@@ -412,10 +412,10 @@ canvas { display: block; background: transparent; }
     </div>
 
     <!-- 间隔 -->
-    <div style="flex:6;flex-shrink:0;"></div>
+    <div style="flex:3;flex-shrink:0;"></div>
 
     <!-- ===== Card 2: 工单数量 ===== -->
-    <div class="section" style="flex:14; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
+    <div class="section" style="flex:20; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
       <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
         <div style="font-size:15px; color:#38bdf8;">目标工单数量：<span id="targetJobsValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
         <div style="font-size:15px; color:#38bdf8;">完成率：<span id="jobsCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
@@ -426,10 +426,10 @@ canvas { display: block; background: transparent; }
     </div>
 
     <!-- 间隔 -->
-    <div style="flex:6;flex-shrink:0;"></div>
+    <div style="flex:3;flex-shrink:0;"></div>
 
     <!-- ===== Card 3: 工时 ===== -->
-    <div class="section" style="flex:14; display:flex; flex-direction:column; justify-content:center; padding:10px 12px;">
+    <div class="section" style="flex:20; display:flex; flex-direction:column; justify-content:center; padding:10px 12px;">
       <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
         <div style="font-size:15px; color:#fb923c;">目标工时：<span id="targetHoursValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
         <div style="font-size:15px; color:#fb923c;">完成率：<span id="hoursCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
@@ -448,20 +448,20 @@ canvas { display: block; background: transparent; }
       <span style="font-size:17px;font-weight:700">工序完成进度</span>
       <span style="min-width:60px"></span>
     </div>
-    <div class="section-body" style="padding:8px 8px;flex:1;min-height:0;overflow-y:auto;">
+    <div class="section-body" style="padding:4px 8px;flex:1;min-height:0;overflow-y:auto;">
       <table class="station-table" id="stationTable">
           <colgroup>
             <col style="width:8%">
             <col class="divider-col">
-            <col style="width:16%">
             <col style="width:14%">
+            <col style="width:15%">
             <col class="divider-col">
-            <col style="width:16%">
             <col style="width:14%">
+            <col style="width:15%">
             <col class="divider-col">
-            <col style="width:5%">
-            <col style="width:7%">
-            <col style="width:18%">
+            <col style="width:4%">
+            <col style="width:6%">
+            <col style="width:20%">
           </colgroup>
         <thead>
           <tr>
@@ -822,6 +822,10 @@ function renderStationTable(stats) {
   const workdaysInMonth = window._workdaysInMonth || 20;
   const passedWorkDays = window._passedWorkDays || 1;
 
+  // ===== 目标线：基于工作日时间进度（已过工作日 / 当月总工作日） =====
+  // 目标线含义：按时间进度，到今天应该完成总目标的百分之多少
+  const timeTargetRate = workdaysInMonth > 0 ? Math.round((passedWorkDays / workdaysInMonth) * 100) : 0;
+
   DISPLAY_STATIONS.forEach(st => {
     const all = byStation[st] || 0;
     const color = STATION_COLORS[st] || '#94a3b8';
@@ -834,44 +838,54 @@ function renderStationTable(stats) {
     const cumHours = stationHours[st] || 0;
     // 工时进度：累计完成工时 / 目标总工时
     const hoursRate = targetHours > 0 ? Math.round((cumHours / targetHours) * 100) : 0;
-    // 每日目标 = 月度目标 / 当月工作日数
-    const dailyTarget = targetHours > 0 ? targetHours / workdaysInMonth : 0;
-    const cumTarget = dailyTarget * passedWorkDays;
-    const targetRate = targetHours > 0 ? Math.round((cumTarget / targetHours) * 100) : 0;
     // 进度条宽度
     const actualBarWidth = Math.min(hoursRate, 100);
-    const targetBarWidth = Math.min(targetRate, 100);
-    // 工时进度条颜色：实际≥目标→绿色，否则按当前进度给红/黄
-    let hoursBarColor;
-    if (hoursRate >= targetRate) {
-      hoursBarColor = '#4ade80';
-    } else if (hoursRate < 50) {
-      hoursBarColor = '#f87171';
-    } else {
-      hoursBarColor = '#fbbf24';
-    }
+    // 工时进度条颜色：达到目标→绿色，未达到→黄色
+    const hoursBarColor = hoursRate >= timeTargetRate ? '#4ade80' : '#fbbf24';
 
     // ===== 销售完成率：已完成销售 / 目标销售 =====
     const salesVal = stationSales[st] || 0;
     const stationSalesRate = targetSales > 0 ? Math.round((salesVal / targetSales) * 100) : 0;
+    const salesBarWidth = Math.min(stationSalesRate, 100);
+
+    // ===== 工单进度条宽度 =====
+    const jobsBarWidth = Math.min(pct, 100);
+
+    // 销售进度条颜色：达到目标→绿色，未达到→黄色
+    const salesBarColor = stationSalesRate >= timeTargetRate ? '#4ade80' : '#fbbf24';
+
+    // 工单进度条颜色：达到目标→绿色，未达到→黄色
+    const jobsBarColor = pct >= timeTargetRate ? '#4ade80' : '#fbbf24';
 
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td><span class="dot" style="background:' + color + '"></span><strong>' + (STATION_CN[st] || st) + '</strong></td>' +
       '<td class="divider-cell"></td>' +
       '<td style="color:#a78bfa;font-weight:600">' + (salesVal > 0 ? '$' + salesVal.toLocaleString('en-US', {minimumFractionDigits: 2}) : '-') + '</td>' +
-      '<td><div class="progress-bar-wrap"><div class="progress-bar" style="width:' + stationSalesRate + '%;background:' + color + '"></div><span class="progress-bar-text" style="color:' + color + '">' + stationSalesRate + '%</span></div></td>' +
+      '<td style="display:flex;align-items:center;gap:4px;">' +
+        '<span style="font-size:12px;font-weight:600;color:' + salesBarColor + ';min-width:32px;text-align:right;">' + stationSalesRate + '%</span>' +
+        '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
+          '<div class="progress-bar" style="width:' + salesBarWidth + '%;background:' + salesBarColor + ';"></div>' +
+          (timeTargetRate > 0 ? '<div style="position:absolute;left:' + timeTargetRate + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + Math.min(timeTargetRate, 95) + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + timeTargetRate + '%</span>' : '') +
+        '</div>' +
+      '</td>' +
       '<td class="divider-cell"></td>' +
       '<td><strong>' + all + '</strong></td>' +
-      '<td><div class="progress-bar-wrap"><div class="progress-bar" style="width:' + pct + '%;background:' + color + '"></div><span class="progress-bar-text" style="color:' + color + '">' + pct + '%</span></div></td>' +
+      '<td style="display:flex;align-items:center;gap:4px;">' +
+        '<span style="font-size:12px;font-weight:600;color:' + jobsBarColor + ';min-width:32px;text-align:right;">' + pct + '%</span>' +
+        '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
+          '<div class="progress-bar" style="width:' + jobsBarWidth + '%;background:' + jobsBarColor + ';"></div>' +
+          (timeTargetRate > 0 ? '<div style="position:absolute;left:' + timeTargetRate + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + Math.min(timeTargetRate, 95) + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + timeTargetRate + '%</span>' : '') +
+        '</div>' +
+      '</td>' +
       '<td class="divider-cell"></td>' +
-      '<td style="color:#fbbf24;font-weight:600;font-size:13px;">' + todayHours.toFixed(1) + '</td>' +
-      '<td style="color:#fbbf24;font-weight:600;font-size:13px;">' + cumHours.toFixed(1) + '</td>' +
+      '<td style="color:#60a5fa;font-weight:600;font-size:13px;">' + todayHours.toFixed(1) + '</td>' +
+      '<td style="color:#60a5fa;font-weight:600;font-size:13px;">' + cumHours.toFixed(1) + '</td>' +
       '<td style="display:flex;align-items:center;gap:4px;">' +
         '<span style="font-size:12px;font-weight:600;color:' + hoursBarColor + ';min-width:32px;text-align:right;">' + hoursRate + '%</span>' +
-        '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;">' +
+        '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + actualBarWidth + '%;background:' + hoursBarColor + ';"></div>' +
-          (targetRate > 0 && targetRate < 100 ? '<div style="position:absolute;left:' + targetBarWidth + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + targetBarWidth + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + targetRate + '%</span>' : '') +
+          (timeTargetRate > 0 ? '<div style="position:absolute;left:' + timeTargetRate + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + Math.min(timeTargetRate, 95) + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + timeTargetRate + '%</span>' : '') +
         '</div>' +
       '</td>';
     tbody.appendChild(tr);
