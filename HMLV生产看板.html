@@ -391,24 +391,54 @@ canvas { display: block; background: transparent; }
   </div>
 </div>
 
-  <!-- KPI Cards Row (4 cards) -->
-  <div id="kpiCardsRow" style="display:flex;gap:6px;flex-shrink:0;">
-    <div class="section kpi-card" style="flex:1;border-color:rgba(167,139,250,0.4);color:#a78bfa;">
-      <div class="kpi-title" style="color:#a78bfa;">当月目标销售</div>
-      <div class="kpi-value" style="color:#a78bfa;" id="targetSalesValue">-</div>
+  <!-- KPI Cards Row (3 cards, centered over station progress 3 columns) -->
+  <div id="kpiCardsRow" style="display:flex;flex-shrink:0;padding:0 8px;">
+
+    <!-- 左侧占位：对齐工序进度表的"工序列" -->
+    <div style="flex:8;flex-shrink:0;"></div>
+
+    <!-- 左留白 -->
+    <div style="flex:1;flex-shrink:0;"></div>
+
+    <!-- ===== Card 1: 销售 ===== -->
+    <div class="section" style="flex:14; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
+      <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
+        <div style="font-size:15px; color:#a78bfa;">目标销售：<span id="targetSalesValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#a78bfa;">完成率：<span id="salesCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
+      </div>
+      <div style="text-align:center; padding:4px 0 2px; font-size:11px; color:#94a3b8;">
+        已释放销售：<span id="totalSalesDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
+      </div>
     </div>
-    <div class="section kpi-card" style="flex:1;border-color:rgba(34,211,238,0.4);color:#22d3ee;">
-      <div class="kpi-title" style="color:#22d3ee;">当月释放工单销售</div>
-      <div class="kpi-value" style="color:#22d3ee;" id="totalSalesDisplay">-</div>
+
+    <!-- 间隔 -->
+    <div style="flex:6;flex-shrink:0;"></div>
+
+    <!-- ===== Card 2: 工单数量 ===== -->
+    <div class="section" style="flex:14; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
+      <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
+        <div style="font-size:15px; color:#38bdf8;">目标工单数量：<span id="targetJobsValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#38bdf8;">完成率：<span id="jobsCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
+      </div>
+      <div style="text-align:center; padding:4px 0 2px; font-size:11px; color:#94a3b8;">
+        已释放工单数量：<span id="totalJobsDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
+      </div>
     </div>
-    <div class="section kpi-card" style="flex:1;border-color:rgba(56,189,248,0.4);color:#38bdf8;">
-      <div class="kpi-title" style="color:#38bdf8;">当月已释放工单数量</div>
-      <div class="kpi-value" style="color:#38bdf8;" id="totalJobsDisplay">-</div>
+
+    <!-- 间隔 -->
+    <div style="flex:6;flex-shrink:0;"></div>
+
+    <!-- ===== Card 3: 工时 ===== -->
+    <div class="section" style="flex:14; display:flex; flex-direction:column; justify-content:center; padding:10px 12px;">
+      <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
+        <div style="font-size:15px; color:#fb923c;">目标工时：<span id="targetHoursValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#fb923c;">完成率：<span id="hoursCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
+      </div>
+      <div style="text-align:center; padding:4px 0 2px; font-size:11px; color:#94a3b8;">
+        已释放工单工时：<span id="totalHoursDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
+      </div>
     </div>
-    <div class="section kpi-card" style="flex:1;border-color:rgba(251,146,60,0.4);color:#fb923c;">
-      <div class="kpi-title" style="color:#fb923c;">已释放工单总工时</div>
-      <div class="kpi-value" style="color:#fb923c;" id="totalAsmHoursDisplay">-</div>
-    </div>
+
   </div>
 
   <!-- Station Progress (table only, no inline metrics) -->
@@ -471,13 +501,13 @@ canvas { display: block; background: transparent; }
 <script>
 const STATION_COLORS = {
   Print:'#38bdf8', Cut:'#4ade80', Pre:'#facc15',
-  Asm:'#fb923c', Bundle:'#c084fc', Test:'#f87171', Pack:'#2dd4bf'
+  Asm:'#fb923c', Test:'#f87171', Pack:'#2dd4bf'
 };
 const STATION_CN = {
-  Print:'工单打印', Cut:'剪线', Pre:'预处理',
-  Asm:'组装', Bundle:'Bundle', Test:'测试', Pack:'包装'
+  Print:'工单打印 Print', Cut:'剪线 Cut', Pre:'预处理 Pre',
+  Asm:'组装 Asm', Test:'测试 Test', Pack:'包装 Pack'
 };
-const STATION_LIST = ['Print','Cut','Pre','Asm','Bundle','Test','Pack'];
+const STATION_LIST = ['Print','Cut','Pre','Asm','Test','Pack'];
 const DISPLAY_STATIONS = ['Cut','Pre','Asm','Test','Pack'];
 
 let totalJobCount = 1;
@@ -519,6 +549,16 @@ function loadExcelJobs() {
         if (json.data && json.data.sales) {
           window._totalSales = json.data.sales.total_sales || 0;
           window._salesData = json.data.sales;
+        }
+        // 保存当月工单数据
+        if (json.data && json.data.current_month) {
+          window._salesData = window._salesData || {};
+          window._salesData._currentMonth = json.data.current_month;
+          window._currentMonth = json.data.current_month;
+        }
+        // 保存工时数据
+        if (json.data && json.data.asm_hours) {
+          window._asmHours = json.data.asm_hours;
         }
         // 保存各工序销售
         if (json.data && json.data.station_sales) {
@@ -580,13 +620,10 @@ function renderExcelCards(data) {
   const mo = String(today.getMonth() + 1).padStart(2, '0');
   const d = String(today.getDate()).padStart(2, '0');
   document.getElementById('todayDateLabel').textContent = y + '-' + mo + '-' + d;
-
-  if (!data || !data.current_month) {
-    return;
+  // 工单和工时的目标卡片由 renderAllTargets() 统一渲染
+  if (window._targetJobs || window._targetHours || window._salesTarget) {
+    renderAllTargets();
   }
-
-  const c = data.current_month;
-  document.getElementById('totalJobsDisplay').textContent = c.total;
 }
 
 function renderSalesCards(data) {
@@ -596,39 +633,99 @@ function renderSalesCards(data) {
   const s = data.sales;
   const totalSales = s.total_sales || 0;
   const fmt = (n) => '$' + Math.round(n).toLocaleString('en-US');
+  // 右侧：当月已释放工单销售（所有释放工单）
   document.getElementById('totalSalesDisplay').textContent = fmt(totalSales);
-}
-
-// 组装工时卡片
-function renderAsmHoursDisplay(data) {
-  const asmDisplay = document.getElementById('totalAsmHoursDisplay');
-  if (!data || !data.asm_hours) {
-    if (asmDisplay) asmDisplay.textContent = '暂无数据';
-    return;
+  // 触发统一渲染（如果目标数据已就绪）
+  if (window._salesTarget) {
+    renderAllTargets();
   }
-  const totalHours = data.asm_hours.total_hours || 0;
-  if (asmDisplay) asmDisplay.textContent = totalHours.toFixed(2) + ' H';
 }
 
-// ========== 当月目标销售卡片 ==========
+// 工时数据保存到 window，由 renderAllTargets() 统一渲染
+function renderAsmHoursDisplay(data) {
+  // 工时目标卡片由 renderAllTargets() 处理，这里只触发
+  if (window._targetJobs || window._targetHours || window._salesTarget) {
+    renderAllTargets();
+  }
+}
+
+// ========== 当月目标数据（销售+工单+工时）==========
 function loadSalesTarget() {
   fetch('/api/sales-target?t=' + Date.now())
     .then(r => r.json())
     .then(json => {
       if (json.success) {
         window._salesTarget = json.target || 0;
-        // 销售目标就绪后，如果已有销售数据就渲染
-        if (window._salesData) {
-          renderSalesTarget();
-        }
+        window._targetJobs = json.target_jobs || 0;
+        window._targetHours = json.target_hours || 0;
+        // 目标数据就绪后，如果已有销售数据就渲染所有卡片
+        renderAllTargets();
       }
     })
-    .catch(e => console.error('销售目标加载失败:', e));
+    .catch(e => console.error('目标数据加载失败:', e));
+}
+
+// 统一渲染三个目标卡片
+function renderAllTargets() {
+  if (!window._salesData) return;
+  // 销售卡片
+  renderSalesTarget();
+  // 工单卡片
+  renderJobsTarget();
+  // 工时卡片
+  renderHoursTarget();
 }
 
 function renderSalesTarget() {
   const target = window._salesTarget || 0;
-  document.getElementById('targetSalesValue').textContent = '$' + Math.round(target).toLocaleString('en-US');
+  const completedSales = (window._stationSales && window._stationSales['Pack']) || 0;
+  const releasedSales = window._totalSales || 0;
+  const fmt = (n) => '$' + Math.round(n).toLocaleString('en-US');
+
+  document.getElementById('targetSalesValue').textContent = fmt(target);
+  document.getElementById('totalSalesDisplay').textContent = fmt(releasedSales);
+
+  const rateEl = document.getElementById('salesCompletionRate');
+  if (target > 0) {
+    const rate = Math.round(completedSales / target * 100);
+    if (rateEl) rateEl.textContent = Math.min(rate, 999) + '%';
+  } else {
+    if (rateEl) rateEl.textContent = '-';
+  }
+}
+
+function renderJobsTarget() {
+  const target = window._targetJobs || 0;
+  const completed = window._packCompletedJobs || 0;
+  const released = (window._salesData && window._currentMonth && window._currentMonth.total) || 0;
+
+  document.getElementById('targetJobsValue').textContent = target || '-';
+  document.getElementById('totalJobsDisplay').textContent = released;
+
+  const rateEl = document.getElementById('jobsCompletionRate');
+  if (target > 0) {
+    const rate = Math.round(completed / target * 100);
+    if (rateEl) rateEl.textContent = Math.min(rate, 999) + '%';
+  } else {
+    if (rateEl) rateEl.textContent = '-';
+  }
+}
+
+function renderHoursTarget() {
+  const target = window._targetHours || 0;
+  const completed = (window._stationHours && window._stationHours['Pack']) || 0;
+  const released = (window._asmHours && window._asmHours.total_hours) || 0;
+
+  document.getElementById('targetHoursValue').textContent = target > 0 ? target.toFixed(2) + ' H' : '-';
+  document.getElementById('totalHoursDisplay').textContent = released.toFixed(2) + ' H';
+
+  const rateEl = document.getElementById('hoursCompletionRate');
+  if (target > 0) {
+    const rate = Math.round(completed / target * 100);
+    if (rateEl) rateEl.textContent = Math.min(rate, 999) + '%';
+  } else {
+    if (rateEl) rateEl.textContent = '-';
+  }
 }
 
 function manualRefresh() {
@@ -683,9 +780,12 @@ function renderAll(json) {
 
   // 构造 all.job_by_station：从 station_stats 数组里读完成数（当月数据）
   const jobByStation = {};
-  stationStats.forEach(s => { 
-    jobByStation[s.station] = s.done; 
+  stationStats.forEach(s => {
+    jobByStation[s.station] = s.done;
   });
+
+  // 缓存Pack完成工单数，供KPI卡片复用（确保与工序进度表一致）
+  window._packCompletedJobs = jobByStation['Pack'] || 0;
 
   const stats = {
     updated_at: json.updated_at,
@@ -693,44 +793,51 @@ function renderAll(json) {
   };
 
   renderStationTable(stats);
+
+  // /api/data 返回后，Pack工单数已就绪，重新渲染KPI卡片确保一致
+  if (window._salesData) {
+    renderAllTargets();
+  }
 }
 
 function renderStationTable(stats) {
   const tbody = document.getElementById('stationBody');
   tbody.innerHTML = '';
-  const totalJobs = totalJobCount || 1;
+
+  // ===== 进度分母：全部使用数据库目标值 =====
+  const targetSales = window._salesTarget || 0;      // 目标销售（来自 /api/sales-target）
+  const targetJobs = window._targetJobs || 0;        // 目标工单数量（来自 /api/sales-target）
+  const targetHours = window._targetHours || 0;      // 目标总工时（来自 /api/sales-target）
 
   // 从 all.by_station 获取当月完成数
   const byStation = stats.all?.by_station || {};
-  
+
   // 调试：打印数据
   console.log('[DEBUG] byStation:', byStation);
-  console.log('[DEBUG] totalJobs:', totalJobs);
+  console.log('[DEBUG] 目标值 → 销售:', targetSales, '工单:', targetJobs, '工时:', targetHours);
 
-  const salesData = window._salesData || {};
-  const totalSales = salesData.total_sales || 0;
+  const stationSales = window._stationSales || {};
   const stationHours = window._stationHours || {};
   const stationHoursToday = window._stationHoursToday || {};
-  const totalHoursAll = window._totalHoursAll || 1;  // 月度总目标工时
   const workdaysInMonth = window._workdaysInMonth || 20;
   const passedWorkDays = window._passedWorkDays || 1;
-  
+
   DISPLAY_STATIONS.forEach(st => {
     const all = byStation[st] || 0;
-    const pct = totalJobs > 0 ? Math.round((all / totalJobs) * 100) : 0;
     const color = STATION_COLORS[st] || '#94a3b8';
 
-    // 工时计算
+    // ===== 工单进度：已完成工单 / 目标工单数量 =====
+    const pct = targetJobs > 0 ? Math.round((all / targetJobs) * 100) : 0;
+
+    // ===== 工时计算 =====
     const todayHours = stationHoursToday[st] || 0;
     const cumHours = stationHours[st] || 0;
-    // 每日目标 = 月度总目标 / 当月工作日数
-    const dailyTarget = totalHoursAll / workdaysInMonth;
-    // 累计目标 = 每日目标 × 已过工作日数（旧逻辑）
+    // 工时进度：累计完成工时 / 目标总工时
+    const hoursRate = targetHours > 0 ? Math.round((cumHours / targetHours) * 100) : 0;
+    // 每日目标 = 月度目标 / 当月工作日数
+    const dailyTarget = targetHours > 0 ? targetHours / workdaysInMonth : 0;
     const cumTarget = dailyTarget * passedWorkDays;
-    // 完成率 = 累计完成工时 / 月度总目标工时
-    const hoursRate = totalHoursAll > 0 ? Math.round((cumHours / totalHoursAll) * 100) : 0;
-    // 目标率 = 累计目标 / 月度总目标工时
-    const targetRate = totalHoursAll > 0 ? Math.round((cumTarget / totalHoursAll) * 100) : 0;
+    const targetRate = targetHours > 0 ? Math.round((cumTarget / targetHours) * 100) : 0;
     // 进度条宽度
     const actualBarWidth = Math.min(hoursRate, 100);
     const targetBarWidth = Math.min(targetRate, 100);
@@ -743,13 +850,10 @@ function renderStationTable(stats) {
     } else {
       hoursBarColor = '#fbbf24';
     }
-    // 目标进度条颜色（蓝色系）
-    const targetBarColor = '#38bdf8';
 
-    // 销售
-    const stationSales = window._stationSales || {};
+    // ===== 销售完成率：已完成销售 / 目标销售 =====
     const salesVal = stationSales[st] || 0;
-    const stationSalesRate = totalSales > 0 ? Math.round((salesVal / totalSales) * 100) : 0;
+    const stationSalesRate = targetSales > 0 ? Math.round((salesVal / targetSales) * 100) : 0;
 
     const tr = document.createElement('tr');
     tr.innerHTML =
@@ -840,9 +944,7 @@ function renderWIP(data) {
       let cls = 'ok';
       if (j.dwell_hours > 48) cls = 'warn';
       else if (j.dwell_hours > 24) cls = 'mid';
-      const dwellStr = j.dwell_hours >= 24
-        ? (j.dwell_hours / 24).toFixed(1) + '天'
-        : j.dwell_hours.toFixed(1) + 'H';
+      const dwellStr = j.dwell_hours.toFixed(1) + 'H';
       const itemText = j.item || '';
       const isTransferred = j.transferred;
       let rowStyle = isExc ? 'background:#7f1d1d;' : '';
@@ -896,7 +998,7 @@ function searchWO() {
 
       const STEP_COLORS = {
         Print:'#38bdf8', Cut:'#4ade80', Pre:'#facc15',
-        Asm:'#fb923c', Bundle:'#c084fc', Test:'#f87171', Pack:'#2dd4bf'
+        Asm:'#fb923c', Test:'#f87171', Pack:'#2dd4bf'
       };
 
       let html = '';

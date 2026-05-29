@@ -33,12 +33,10 @@ STATION_LABEL = {
 STATION_CN_TO_KEY = {v: k for k, v in STATION_LABEL.items()}
 # 追加其他可能的别名（含数据库中实际存储的"中文+英文"混合格式）
 STATION_CN_TO_KEY.update({
-    'Bundle': 'Bundle',
-    'bundle': 'Bundle',
     'PRINT': 'Print', 'PRINT ': 'Print',
     # ★★★ 数据库纯英文缩写（最优先，精确匹配）★★★
     'Print': 'Print', 'Cut': 'Cut', 'Pre': 'Pre', 'Asm': 'Asm',
-    'Test': 'Test', 'Pack': 'Pack', 'Bundle': 'Bundle',
+    'Test': 'Test', 'Pack': 'Pack',
     # 数据库实际存的值（英文变体）
     'Cutting': 'Cut', 'Pretreat': 'Pre', 'Package': 'Pack',
     'Assembly': 'Asm', 'Job': 'Print',  # Job=工单打印
@@ -47,7 +45,6 @@ STATION_CN_TO_KEY.update({
     '剪线 Cutting': 'Cut',
     '预处理 Pretreat': 'Pre',
     '组装 Assembly': 'Asm',
-    '捆扎 Bundle': 'Bundle',
     '测试 Test': 'Test',
     '包装 Package': 'Pack',
     # 模糊匹配：如果数据库值包含这些关键字也能匹配
@@ -125,6 +122,61 @@ def parse_complete_date(val):
             continue
 
     return None
+
+
+def compute_station_jobs_with_cascade(records, station_col, date_col, job_col, now_month, station_list=None):
+    """
+    跨月工序归属：如果一个工单在当月完成了某道工序，
+    则该工单前面所有已完成的工序都算当月完成。
+
+    返回: dict[station] = set(jobs)  — 当月各工序应归属的工单集合
+    """
+    if station_list is None:
+        station_list = STATION_ORDER
+
+    # 1) 收集当月实际完成的 (工单, 工序) 对
+    month_done = {}  # job -> set of stations completed this month
+    for r in records:
+        station_raw = str(r.get(station_col, '') or '').strip()
+        station_en = STATION_CN_TO_KEY.get(station_raw, '')
+        if station_en not in station_list:
+            continue
+        dv = str(r.get(date_col, '') or '').strip()
+        if not dv.startswith(now_month):
+            continue
+        job = str(r.get(job_col, '') or '').strip()
+        if not job:
+            continue
+        if job not in month_done:
+            month_done[job] = set()
+        month_done[job].add(station_en)
+
+    # 2) 收集每个工单所有时间完成的工序（不限月份）
+    all_done = {}  # job -> set of stations ever completed
+    for r in records:
+        station_raw = str(r.get(station_col, '') or '').strip()
+        station_en = STATION_CN_TO_KEY.get(station_raw, '')
+        if station_en not in station_list:
+            continue
+        job = str(r.get(job_col, '') or '').strip()
+        if not job:
+            continue
+        if job not in all_done:
+            all_done[job] = set()
+        all_done[job].add(station_en)
+
+    # 3) 对当月有活动的工单，找到最远工序，前面所有已完成的工序都归入当月
+    result = {st: set() for st in station_list}
+    for job, month_stations in month_done.items():
+        # 当月最远工序索引
+        max_idx = max(station_list.index(st) for st in month_stations)
+        # 该工单所有已完成的工序中，索引 <= max_idx 的都归入当月
+        job_all = all_done.get(job, set())
+        for st in job_all:
+            if station_list.index(st) <= max_idx:
+                result[st].add(job)
+
+    return result
 
 
 def get_pack_completed_jobs(month=None):
@@ -288,23 +340,27 @@ def api_data():
                         done_today.add(j)
             today_station_done[s] = len(done_today)
 
-        # ---- 工序完成率（仅统计当月数据）----
-        # 基准数 = 当月工单总数（ship_date在当月的工单数）
-        # 需要从 df_all 获取当月工单总数
+        # ---- 工序完成率（以排产表 ship_date 当月 JOB 为准）----
+        # 基准数 = 当月排产工单总数（ship_date在当月）
         df_this_month = df_all[df_all['_month'] == current_month]
-        month_total_jobs = len(df_this_month['job'].dropna().astype(str).str.strip().unique())
+        month_jobs_erp = set(df_this_month['job'].dropna().astype(str).str.strip().str.upper().unique())
+        month_total_jobs = len(month_jobs_erp)
         base = month_total_jobs if month_total_jobs > 0 else 1  # 避免除零
+
+        # 对当月排产 JOB，统计各工序完成情况（不限完成月份，跨月也纳入）
+        station_done_map = {s: set() for s in STATION_ORDER}
+        for r in rows:
+            job = str(r.get(job_col, '') or '').strip().upper()
+            if job not in month_jobs_erp:
+                continue
+            sv = str(r.get(station_col, '') or '').strip()
+            station_en = STATION_CN_TO_KEY.get(sv, '')
+            if station_en in STATION_ORDER:
+                station_done_map[station_en].add(job)
 
         station_stats = []
         for s in STATION_ORDER:
-            done_jobs_month = set()
-            for r in rows:
-                sv = str(r.get(station_col, '') or '').strip()
-                dv = str(r.get(date_col, '') or '').strip()
-                j = r.get(job_col)
-                if sv == s and j and dv.startswith(current_month):
-                    done_jobs_month.add(j)
-            done_month = len(done_jobs_month)
+            done_month = len(station_done_map[s])
             pct = round(done_month / base * 100, 1) if base > 0 else 0
             station_stats.append({
                 'station': s,
@@ -334,46 +390,26 @@ def api_data():
             for k, v in daily.items()
         ], key=lambda x: x['date'])
 
-        # ---- 工序甘特/流程 WIP ----
+        # ---- 工序甘特/流程 WIP（基于当月排产 JOB）----
         # 在制品：已打印但尚未到达该工序完成的工单
-        # 所有数据从 production_records 表获取，只统计当月数据
         wip_by_station = []
         for i, s in enumerate(STATION_ORDER):
             # 在制品 = 前一道工序完成的工单数 - 当前工序完成的工单数
             if i == 0:
                 # 第一道工序：WIP = 当月工单总数 - 当前工序完成数
-                prev_done = base  # base = 当月工单总数
+                prev_done = base  # base = 当月排产工单总数
             else:
                 prev_s = STATION_ORDER[i-1]
-                prev_done_jobs = set()
-                for r in rows:
-                    sv = str(r.get(station_col, '') or '').strip()
-                    dv = str(r.get(date_col, '') or '').strip()
-                    # 只统计当月完成的数据
-                    if sv == prev_s and dv.startswith(current_month):
-                        j = r.get(job_col)
-                        if j:
-                            prev_done_jobs.add(j)
-                prev_done = len(prev_done_jobs)
+                prev_done = len(station_done_map[prev_s])
 
-            cur_done_jobs = set()
-            for r in rows:
-                sv = str(r.get(station_col, '') or '').strip()
-                dv = str(r.get(date_col, '') or '').strip()
-                # 只统计当月完成的数据
-                if sv == s and dv.startswith(current_month):
-                    j = r.get(job_col)
-                    if j:
-                        cur_done_jobs.add(j)
-            cur_done = len(cur_done_jobs)
+            cur_done = len(station_done_map[s])
             wip = max(0, prev_done - cur_done)
-            
+
             # ---- 计算滞留天数 ----
             # 滞留工单：已完成前一道工序但尚未完成当前工序的工单
-            滞留_jobs = prev_done_jobs - cur_done_jobs if i > 0 else set()
-            if i == 0:
-                # 第一道工序：滞留 = 当月工单 - Print完成
-                滞留_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().unique()) - cur_done_jobs
+            prev_jobs_set = station_done_map[STATION_ORDER[i-1]] if i > 0 else month_jobs_erp
+            cur_jobs_set = station_done_map[s]
+            滞留_jobs = prev_jobs_set - cur_jobs_set
             
             if len(滞留_jobs) > 0:
                 # 计算平均滞留天数
@@ -489,7 +525,7 @@ def api_excel_jobs():
         station_col = find_col('station', 'process', 'operation')
         date_col = find_col('completedate', 'complete', 'date', 'created')
 
-        station_jobs = {s: set() for s in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']}
+        station_jobs = {s: set() for s in STATION_ORDER}
 
         for r in records:
             station_raw = str(r.get(station_col, '') or '').strip()
@@ -520,28 +556,26 @@ def api_excel_jobs():
 
         # ========== 当前月份工单集合（用于各模块引用）==========
         df_this_month = df_all[df_all['_month'] == now_month]
-        all_month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().unique())
+        all_month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().str.upper().unique())
 
-        # ========== 工序销售金额 ==========
-        # 逻辑：每个工序的销售 = ship_date在当月 且 当月完成了该工序的所有工单的销售之和（按工单去重）
-        station_sales = {st: 0.0 for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']}
-        STATION_LIST = ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']
+        # ========== 工序销售金额（以排产表当月 JOB 为准）==========
+        STATION_LIST = STATION_ORDER
 
-        # 先收集当月各工序完成的工单集合（去重）
-        station_jobs_map = {st: set() for st in STATION_LIST}
+        # 对当月排产 JOB，统计各工序完成情况（不限完成月份）
+        station_done_for_month = {st: set() for st in STATION_LIST}
         for r in records:
-            station_raw = str(r.get(station_col, '') or '').strip()
-            station_en = STATION_CN_TO_KEY.get(station_raw, '')
-            dv = str(r.get(date_col, '') or '').strip()
-            if station_en in STATION_LIST and dv.startswith(now_month):
-                job = str(r.get(job_col, '') or '').strip()
-                if job:
-                    station_jobs_map[station_en].add(job)
+            job = str(r.get(job_col, '') or '').strip().upper()
+            if job not in all_month_jobs:
+                continue
+            sv = str(r.get(station_col, '') or '').strip()
+            station_en = STATION_CN_TO_KEY.get(sv, '')
+            if station_en in STATION_LIST:
+                station_done_for_month[station_en].add(job)
 
-        # 只取当月完成了该工序的工单，按工单去重累加销售额
+        station_sales = {}
         for st in STATION_LIST:
             sales = 0.0
-            for job in station_jobs_map[st]:
+            for job in station_done_for_month[st]:
                 sales += job_sales_map.get(job, 0)
             station_sales[st] = round(sales, 2)
         result['station_sales'] = station_sales
@@ -561,19 +595,12 @@ def api_excel_jobs():
             'pending': len(pending_jobs),
         }
 
-        # ========== 各工序已消耗工时 ==========
-        # 逻辑：工序累计工时 = 该工序当月完成的所有记录.qty × cycle_time_h 的累加（不去重，每条记录独立计算）
+        # ========== 各工序已消耗工时（以排产表当月 JOB 为准，去重）==========
         station_hours = {}
-        for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
+        for st in STATION_LIST:
             hours = 0.0
-            for r in records:
-                station_raw = str(r.get(station_col, '') or '').strip()
-                station_en = STATION_CN_TO_KEY.get(station_raw, '')
-                dv = str(r.get(date_col, '') or '').strip()
-                if station_en == st and dv.startswith(now_month):
-                    job = str(r.get(job_col, '') or '').strip()
-                    if job:
-                        hours += job_hours_map.get(job, 0)
+            for job in station_done_for_month[st]:
+                hours += job_hours_map.get(job, 0)
             station_hours[st] = round(hours, 2)
         result['station_hours'] = station_hours
 
@@ -581,7 +608,7 @@ def api_excel_jobs():
         # 逻辑：当天工序工时 = 当天完成该工序的所有记录.qty × cycle_time_h 的累加（不去重，每条记录独立计算）
         today_str_db = date.today().strftime('%Y-%m-%d')
         station_hours_today = {}
-        for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
+        for st in STATION_LIST:
             hours = 0.0
             for r in records:
                 dv = str(r.get(date_col, '') or '').strip()
@@ -741,7 +768,7 @@ def api_excel_jobs():
         # ========== 每个工序的每日工时目标（按工序工时占比分摊总每日目标）==========
         total_station_hours = sum(result['station_hours'].values()) or 1
         station_daily_target = {}
-        for st in ['Print', 'Cut', 'Pre', 'Asm', 'Bundle', 'Test', 'Pack']:
+        for st in STATION_LIST:
             ratio = result['station_hours'][st] / total_station_hours
             station_daily_target[st] = round(daily_target_hours * ratio, 2)
         result['station_daily_target'] = station_daily_target
@@ -765,7 +792,7 @@ def api_wip():
         cursor = conn.cursor()
 
         # 工序顺序（从 site_station 表）
-        # 工序流程：Print → Cut → Pre → Asm → Test → Pack（忽略Bundle）
+        # 工序流程：Print → Cut → Pre → Asm → Test → Pack
         STATION_ORDER_CN = ['工单打印', '剪线', '预处理', '组装', '测试', '包装']
         STATION_CN_TO_EN = {
             '工单打印': 'Print', '剪线': 'Cut', '预处理': 'Pre',
@@ -861,13 +888,17 @@ def api_wip():
         days_in_month = calendar.monthrange(year, month)[1]
         month_end = datetime(year, month, days_in_month, 23, 59, 59)
 
-        # 找出当月有记录的工单（任意工序在当月完成）
+        # ★ 当月排产 JOB（ship_date 在当月）— 从 ERP 排产表获取
         month_jobs = set()
-        for job, stations in job_station_time.items():
-            for t in stations.values():
-                if month_start <= t <= month_end:
-                    month_jobs.add(job)
-                    break
+        try:
+            import pandas as pd
+            df_erp = get_erp_schedule()
+            df_this_month = df_erp[df_erp['_month'] == current_month]
+            month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().str.upper().unique())
+            print(f"[DEBUG] WIP month_jobs 从排产表获取: {len(month_jobs)} 个 (ship_date={current_month})")
+        except Exception as e:
+            print(f"[WARN] WIP 排产数据获取失败: {e}")
+            month_jobs = set()
 
         result = {}
 
@@ -887,28 +918,27 @@ def api_wip():
 
             done_in_month = 0
             wip_list = []
-            for job in month_jobs:  # 只看有当月记录的工单
+            for job in month_jobs:  # 只看当月排产 JOB
                 stations = job_station_time.get(job, {})
-                # 完成数：当前工序在当月完成
+                # 完成数：当月排产 JOB 已完成该工序（不限完成月份）
                 if station_en in stations:
-                    t = stations[station_en]
-                    if month_start <= t <= month_end:
-                        done_in_month += 1
-                # 滞留数：上道工序在当月完成，但当前工序未完成
+                    done_in_month += 1
+                # 滞留数：上道工序已完成但当前工序未完成
                 elif prev_station_en in stations:
                     prev_t = stations[prev_station_en]
-                    if month_start <= prev_t <= month_end:
-                        dwell_hours = round((now - prev_t).total_seconds() / 3600, 1)
-                        wip_entry = {
-                            'job': job,
-                            'item': job_item_map.get(job, ''),
-                            'line': job_line_map.get(job, ''),
-                            'complete_time': prev_t.strftime('%Y-%m-%d %H:%M'),
-                            'dwell_hours': dwell_hours,
-                        }
-                        if job in exc_by_job:
-                            wip_entry['exception'] = exc_by_job[job]
-                        wip_list.append(wip_entry)
+                    # 滞留时间 = 经过的自然日 × 8H
+                    delta_days = (now.date() - prev_t.date()).days
+                    dwell_hours = round(delta_days * 8, 1)
+                    wip_entry = {
+                        'job': job,
+                        'item': job_item_map.get(job, ''),
+                        'line': job_line_map.get(job, ''),
+                        'complete_time': prev_t.strftime('%Y-%m-%d %H:%M'),
+                        'dwell_hours': dwell_hours,
+                    }
+                    if job in exc_by_job:
+                        wip_entry['exception'] = exc_by_job[job]
+                    wip_list.append(wip_entry)
 
             # 按滞留时间降序，异常工单置顶
             exc_count = sum(1 for e in wip_list if 'exception' in e)
@@ -1046,37 +1076,47 @@ SALES_TARGET_FILE = os.environ.get('SALES_TARGET_FILE', r'I:/Production/01 Cor&F
 
 @app.route('/api/sales-target')
 def api_sales_target():
-    """从数据库读取销售目标数据"""
+    """从数据库读取销售目标、工单目标、工时目标数据"""
     try:
         now_month = date.today().strftime('%Y-%m')
-        
-        # 连接 erp_data 数据库读取销售目标
+
         conn_erp = pymysql.connect(
-            host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, 
-            password=MYSQL_PASSWORD, database='erp_data', 
+            host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER,
+            password=MYSQL_PASSWORD, database='erp_data',
             charset='utf8mb4', connect_timeout=10
         )
         cursor = conn_erp.cursor()
-        
-        # 从数据库读取所有月度目标
-        cursor.execute('SELECT target_month, target_amount FROM hmlv_sales_target ORDER BY target_month')
+
+        cursor.execute('SELECT target_month, target_amount, target_order_qty, target_total_hours FROM hmlv_sales_target_v2 ORDER BY target_month')
         rows = cursor.fetchall()
-        all_targets = [{'month': r[0], 'target': float(r[1])} for r in rows]
-        
-        # 查找当月目标
-        target_value = 0.0
+
+        target_amount = 0.0
+        target_jobs = 0
+        target_hours = 0.0
+        all_targets = []
+
         for r in rows:
+            entry = {
+                'month': r[0],
+                'target': float(r[1] or 0),
+                'target_jobs': int(r[2]) if r[2] is not None else 0,
+                'target_hours': float(r[3] or 0)
+            }
+            all_targets.append(entry)
             if r[0] == now_month:
-                target_value = float(r[1])
-                break
-        
+                target_amount = entry['target']
+                target_jobs = entry['target_jobs']
+                target_hours = entry['target_hours']
+
         cursor.close()
         conn_erp.close()
-        
+
         return jsonify({
             'success': True,
             'month': now_month,
-            'target': target_value,
+            'target': target_amount,
+            'target_jobs': target_jobs,
+            'target_hours': target_hours,
             'all_targets': all_targets
         })
     except Exception as e:
