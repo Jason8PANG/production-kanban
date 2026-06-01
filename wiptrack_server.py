@@ -6,7 +6,7 @@ WIPTrack 实时数据 API 服务器
 
 import json
 import pymysql
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 import os
@@ -122,6 +122,25 @@ def parse_complete_date(val):
             continue
 
     return None
+
+
+def count_workdays(start_date, end_date):
+    """
+    计算两个日期之间的工作日天数（排除周六和周日）。
+    start_date: datetime，前一道工序完成日期
+    end_date: datetime，截止日期（今天）
+    返回: int，工作日天数
+    """
+    if start_date >= end_date:
+        return 0
+    count = 0
+    current = start_date.date() if isinstance(start_date, datetime) else start_date
+    end = end_date.date() if isinstance(end_date, datetime) else end_date
+    while current < end:
+        if current.weekday() < 5:  # 0=周一 ... 4=周五，5=周六，6=周日
+            count += 1
+        current += timedelta(days=1)
+    return count
 
 
 def compute_station_jobs_with_cascade(records, station_col, date_col, job_col, now_month, station_list=None):
@@ -430,9 +449,9 @@ def api_data():
                                 pass
                     
                     if prev_complete_date:
-                        # 计算到今天的滞留天数
+                        # 计算到今天的滞留工作日天数（排除周六和周日）
                         today = datetime.now()
-                        days = (today - prev_complete_date).days
+                        days = count_workdays(prev_complete_date, today)
                         total_days += days
                         count_with_date += 1
                 
@@ -926,8 +945,8 @@ def api_wip():
                 # 滞留数：上道工序已完成但当前工序未完成
                 elif prev_station_en in stations:
                     prev_t = stations[prev_station_en]
-                    # 滞留时间 = 经过的自然日 × 8H
-                    delta_days = (now.date() - prev_t.date()).days
+                    # 滞留时间 = 经过的工作日（排除周六日）× 8H
+                    delta_days = count_workdays(prev_t, now)
                     dwell_hours = round(delta_days * 8, 1)
                     wip_entry = {
                         'job': job,
