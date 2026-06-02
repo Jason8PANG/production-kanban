@@ -1290,7 +1290,11 @@ def api_hours_daily():
 @app.route('/')
 def index():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    return send_from_directory(base_dir, 'HMLV生产看板.html')
+    resp = send_from_directory(base_dir, 'HMLV生产看板.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 
 if __name__ == '__main__':

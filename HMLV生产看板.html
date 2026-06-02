@@ -819,12 +819,7 @@ function renderStationTable(stats) {
   const stationSales = window._stationSales || {};
   const stationHours = window._stationHours || {};
   const stationHoursToday = window._stationHoursToday || {};
-  const workdaysInMonth = window._workdaysInMonth || 20;
-  const passedWorkDays = window._passedWorkDays || 1;
-
-  // ===== 目标线：基于工作日时间进度（已过工作日 / 当月总工作日） =====
-  // 目标线含义：按时间进度，到今天应该完成总目标的百分之多少
-  const timeTargetRate = workdaysInMonth > 0 ? Math.round((passedWorkDays / workdaysInMonth) * 100) : 0;
+  // 进度条颜色统一使用对应数值列的颜色，不再与时间目标比较
 
   DISPLAY_STATIONS.forEach(st => {
     const all = byStation[st] || 0;
@@ -840,8 +835,8 @@ function renderStationTable(stats) {
     const hoursRate = targetHours > 0 ? Math.round((cumHours / targetHours) * 100) : 0;
     // 进度条宽度
     const actualBarWidth = Math.min(hoursRate, 100);
-    // 工时进度条颜色：达到目标→绿色，未达到→黄色
-    const hoursBarColor = hoursRate >= timeTargetRate ? '#4ade80' : '#fbbf24';
+    // 工时进度条颜色：与工时数值列一致
+    const hoursBarColor = '#60a5fa';
 
     // ===== 销售完成率：已完成销售 / 目标销售 =====
     const salesVal = stationSales[st] || 0;
@@ -851,11 +846,11 @@ function renderStationTable(stats) {
     // ===== 工单进度条宽度 =====
     const jobsBarWidth = Math.min(pct, 100);
 
-    // 销售进度条颜色：达到目标→绿色，未达到→黄色
-    const salesBarColor = stationSalesRate >= timeTargetRate ? '#4ade80' : '#fbbf24';
+    // 销售进度条颜色：与销售数值列一致
+    const salesBarColor = '#a78bfa';
 
-    // 工单进度条颜色：达到目标→绿色，未达到→黄色
-    const jobsBarColor = pct >= timeTargetRate ? '#4ade80' : '#fbbf24';
+    // 工单进度条颜色：与工单数值列一致
+    const jobsBarColor = '#e2e8f0';
 
     const tr = document.createElement('tr');
     tr.innerHTML =
@@ -866,7 +861,7 @@ function renderStationTable(stats) {
         '<span style="font-size:12px;font-weight:600;color:' + salesBarColor + ';min-width:32px;text-align:right;">' + stationSalesRate + '%</span>' +
         '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + salesBarWidth + '%;background:' + salesBarColor + ';"></div>' +
-          (timeTargetRate > 0 ? '<div style="position:absolute;left:' + timeTargetRate + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + Math.min(timeTargetRate, 95) + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + timeTargetRate + '%</span>' : '') +
+          '' +
         '</div>' +
       '</td>' +
       '<td class="divider-cell"></td>' +
@@ -875,7 +870,7 @@ function renderStationTable(stats) {
         '<span style="font-size:12px;font-weight:600;color:' + jobsBarColor + ';min-width:32px;text-align:right;">' + pct + '%</span>' +
         '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + jobsBarWidth + '%;background:' + jobsBarColor + ';"></div>' +
-          (timeTargetRate > 0 ? '<div style="position:absolute;left:' + timeTargetRate + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + Math.min(timeTargetRate, 95) + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + timeTargetRate + '%</span>' : '') +
+          '' +
         '</div>' +
       '</td>' +
       '<td class="divider-cell"></td>' +
@@ -885,7 +880,7 @@ function renderStationTable(stats) {
         '<span style="font-size:12px;font-weight:600;color:' + hoursBarColor + ';min-width:32px;text-align:right;">' + hoursRate + '%</span>' +
         '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + actualBarWidth + '%;background:' + hoursBarColor + ';"></div>' +
-          (timeTargetRate > 0 ? '<div style="position:absolute;left:' + timeTargetRate + '%;top:0;bottom:0;width:2px;background:#fff;transform:translateX(-1px);opacity:0.9;z-index:2;"></div><span style="position:absolute;left:' + Math.min(timeTargetRate, 95) + '%;top:-1px;transform:translateX(-50%);font-size:9px;color:#e2e8f0;background:#334155;padding:0 3px;border-radius:2px;white-space:nowrap;z-index:3;">' + timeTargetRate + '%</span>' : '') +
+          '' +
         '</div>' +
       '</td>';
     tbody.appendChild(tr);
@@ -956,8 +951,8 @@ function renderWIP(data) {
       // 存储异常数据，供点击事件查找
       if (isExc) window._excData[j.job] = j.exception;
       let cls = 'ok';
-      if (j.dwell_hours > 48) cls = 'warn';
-      else if (j.dwell_hours > 24) cls = 'mid';
+      if (j.dwell_hours > 160) cls = 'warn';
+      else if (j.dwell_hours > 56) cls = 'mid';
       const dwellStr = j.dwell_hours.toFixed(1) + 'H';
       const itemText = j.item || '';
       const isTransferred = j.transferred;
