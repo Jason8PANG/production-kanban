@@ -159,6 +159,38 @@ sudo firewall-cmd --reload
 └── README.md                # 说明文档
 ```
 
+## 更新日志
+
+### 2026-06-04 — 排产表 site_ref 过滤修复
+
+- **问题**：排产表 `erp_data.hmlv_production_schedule` 含 `site_ref` 字段，1216 条记录中 site_ref=310 仅 284 条（23.4%），site_ref=NULL 932 条（76.6%）。代码中所有排产表查询均未过滤 site_ref，导致非 310 工单混入看板指标（数据偏高约 4 倍）
+- **修复**：`get_erp_schedule()` + 4 处直接 SQL 均新增 `WHERE site_ref = 310`（或 `AND ps.site_ref = 310`），共 5 处
+- **效果**：排产工单 1216→284，当月工单 281，销售总额 74.5 万，总工时 4598h
+
+### 2026-06-02 — 进度条样式优化
+
+- 移除工序进度条时间目标线（工作日时间进度），统一使用对应数值列颜色
+- 修复浏览器缓存旧版 HTML 问题：`/` 路由添加 `Cache-Control: no-cache, no-store, must-revalidate`
+
+### 2026-06-01 — 滞留时间计算修复
+
+- 工序 WIP 滞留时间改为按工作日（排除周六日）计算，新增 `count_workdays()` 函数逐日判断 weekday<5
+
+### 2026-05-29 — 核心指标计算逻辑重构
+
+- 工序完成率改为以排产表 ship_date 在当月的 JOB 为基准，不再以 production_records CompleteDate 判断归属月份
+- 工序累计工时（Sales/Hours）改为按工单去重，每工单只算一次 qty × cycle_time_h
+- KPI 卡片"已完成"数据直接复用 Pack 行数据
+
+### 2026-05-26 — 已完成判断逻辑改版
+
+- 不再使用 `job_status` 字段（ERP 不同步，不可靠），改为直接查 `production_records` 判断是否完成 Package 工序
+- 统一大小写策略（所有 job 号 `.strip().upper()`）
+
+### 2026-05-18 — 数据库迁移
+
+- 总工时改用数据库 `cycle_time_h × qty` 计算，不再从 Excel 读取单根时间
+
 ## License
 
 Internal use only.

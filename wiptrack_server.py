@@ -236,6 +236,7 @@ def get_erp_schedule():
                unit_price, sales_amount, job_status, tested_qty, wo_total,
                cycle_time_h
         FROM erp_data.hmlv_production_schedule
+        WHERE site_ref = 310
     """)
     columns = [col[0] for col in cursor.description]
     rows_raw = cursor.fetchall()
@@ -673,7 +674,8 @@ def api_excel_jobs():
         cursor_hours.execute("""
             SELECT SUM(ps.qty * ps.cycle_time_h)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+            WHERE ps.site_ref = 310
+              AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
@@ -685,7 +687,8 @@ def api_excel_jobs():
         cursor_hours.execute("""
             SELECT COUNT(DISTINCT ps.job)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+            WHERE ps.site_ref = 310
+              AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
@@ -699,7 +702,8 @@ def api_excel_jobs():
         cursor_hours.execute("""
             SELECT SUM(ps.qty * ps.cycle_time_h)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+            WHERE ps.site_ref = 310
+              AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci NOT IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
@@ -710,7 +714,8 @@ def api_excel_jobs():
         cursor_hours.execute("""
             SELECT COUNT(DISTINCT ps.job)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE DATE_FORMAT(ps.ship_date, %s) = %s
+            WHERE ps.site_ref = 310
+              AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci NOT IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
