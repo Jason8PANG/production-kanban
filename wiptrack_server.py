@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 WIPTrack 实时数据 API 服务器
 访问 http://localhost:5678/api/data 获取最新数据
@@ -724,7 +724,6 @@ def api_excel_jobs():
         """, ('%Y-%m', now_month))
         pending_asm_count = cursor_hours.fetchone()[0] or 0
 
-        print(f"[DEBUG] SQL工时: completed={completed_asm_hours}h({completed_asm_count}个), pending={pending_asm_hours}h({pending_asm_count}个), total={round(completed_asm_hours + pending_asm_hours, 2)}h")
         conn_hours.close()
         result['asm_hours'] = {
             'pending_hours': pending_asm_hours,
@@ -873,9 +872,9 @@ def api_wip():
                 line = str(row['line']).strip() if pd.notna(row['line']) else ''
                 if line and line != 'nan':
                     job_line_map[j] = line
-            print(f"[DEBUG] job_item_map 加载 {len(job_item_map)} 条, job_line_map 加载 {len(job_line_map)} 条")
+            print(f"[DEBUG] job_item_map loaded {len(job_item_map)} rows, job_line_map loaded {len(job_line_map)} rows")
         except Exception as e:
-            print(f"[WARN] ERP数据读取失败: {e}")
+            print(f"[WARN] ERP data load failed: {e}")
 
         # 查询异常工单
         exc_by_job = {}
@@ -898,7 +897,7 @@ def api_wip():
                     'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else ''
                 })
         except Exception as e:
-            print(f"[WARN] 异常工单查询失败: {e}")
+            print(f"[WARN] exception query failed: {e}")
             exc_by_job = {}
         
         conn.close()
@@ -919,16 +918,11 @@ def api_wip():
             df_erp = get_erp_schedule()
             df_this_month = df_erp[df_erp['_month'] == current_month]
             month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().str.upper().unique())
-            print(f"[DEBUG] WIP month_jobs 从排产表获取: {len(month_jobs)} 个 (ship_date={current_month})")
         except Exception as e:
-            print(f"[WARN] WIP 排产数据获取失败: {e}")
+            print(f"[WARN] WIP schedule data load failed: {e}")
             month_jobs = set()
 
         result = {}
-
-        # ★ 调试：打印关键统计
-        print(f"[DEBUG] month_jobs 工单数: {len(month_jobs)}")
-        print(f"[DEBUG] 剪线(Cut)WIP计算: 遍历 {len(month_jobs)} 个工单...")
 
         # 对每个工序（跳过第一道"工单打印"）：
         # - 完成数：该工序在当月完成
@@ -967,9 +961,6 @@ def api_wip():
             # 按滞留时间降序，异常工单置顶
             exc_count = sum(1 for e in wip_list if 'exception' in e)
             wip_list.sort(key=lambda x: (-(1 if 'exception' in x else 0), -x['dwell_hours']))
-
-            # ★ 调试：打印各工序统计
-            print(f"[DEBUG] {station_en} ({station_cn}): done_in_month={done_in_month}, wip_count={len(wip_list)}, exc_count={exc_count}")
 
             result[station_en] = {
                 'label': station_cn,
@@ -1305,9 +1296,9 @@ def index():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', '5678'))
     print("=" * 50)
-    print("WIPTrack 实时看板服务器启动中...")
-    print(f"访问地址: http://localhost:{port}")
-    print(f"数据接口: http://localhost:{port}/api/data")
-    print("按 Ctrl+C 停止服务器")
+    print("WIPTrack Kanban Server starting...")
+    print(f"URL: http://localhost:{port}")
+    print(f"API: http://localhost:{port}/api/data")
+    print("Press Ctrl+C to stop")
     print("=" * 50)
     app.run(host='0.0.0.0', port=port, debug=False)
