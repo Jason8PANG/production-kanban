@@ -1,8 +1,53 @@
-__pycache__/
-*.pyc
-*.pyo
-*.log
+# 环境变量和本地配置
 .env
-.gitkeep
 .workbuddy/
-组装工序单根生产时间.xlsx
+
+# 临时文件和测试脚本
+_test_*.py
+test_*.py
+check_*.py
+debug_*.py
+debug_*.png
+diagnose_*.txt
+fix_*.py
+hello.py
+
+# API测试和数据导出临时文件
+_api_*.json
+api_*.json
+api_*.txt
+jobs_data_tmp.json
+tmp_*.json
+wip_check.json
+
+# 导出的Excel文件
+*.xlsx
+
+# 日志文件
+*.log
+server_*.txt
+stderr.log
+
+# Playwright CLI 配置
+.playwright-cli/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
