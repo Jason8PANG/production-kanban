@@ -1102,7 +1102,7 @@ def api_sales_target():
         )
         cursor = conn_erp.cursor()
 
-        cursor.execute('SELECT target_month, target_amount, target_order_qty, target_total_hours FROM hmlv_sales_target_v2 ORDER BY target_month')
+        cursor.execute('SELECT target_month, target_amount, target_order_qty, target_total_hours FROM hmlv_sales_target_v2 WHERE siteref=310 ORDER BY target_month')
         rows = cursor.fetchall()
 
         target_amount = 0.0
