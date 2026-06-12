@@ -346,31 +346,31 @@ canvas { display: block; background: transparent; }
   <div class="header-right">
     <div class="refresh-info">
       <span class="refresh-status" id="refreshDot"></span>
-      自动刷新: <span id="countdownText">30s</span>
+      <span data-i18n="refresh_label">自动刷新:</span> <span id="countdownText">30s</span>
       &nbsp;|&nbsp;
-      当前时间: <span id="updated_at">--:--:--</span>
+      <span data-i18n="current_time_label">当前时间:</span> <span id="updated_at">--:--:--</span>
       &nbsp;|&nbsp;
-      共 <span id="total_records">--</span> 条
+      <span data-i18n="total_prefix">共 </span><span id="total_records">--</span><span data-i18n="total_suffix"> 条</span>
     </div>
     <select id="siteSelect">
       <option value="310">HMLV</option>
       <option value="410">Penang</option>
     </select>
     <select id="intervalSelect">
-      <option value="30">30秒</option>
-      <option value="60">1分钟</option>
-      <option value="300" selected>5分钟</option>
-      <option value="600">10分钟</option>
-      <option value="0">手动</option>
+      <option value="30" data-i18n="r30">30秒</option>
+      <option value="60" data-i18n="r60">1分钟</option>
+      <option value="300" selected data-i18n="r300">5分钟</option>
+      <option value="600" data-i18n="r600">10分钟</option>
+      <option value="0" data-i18n="r0">手动</option>
     </select>
     <div style="display:flex;align-items:center;gap:4px;">
       <input id="woSearchInput" type="text" placeholder="搜工单号..." autocomplete="off"
         style="background:rgba(15,23,42,0.8);color:#e2e8f0;border:1px solid #475569;padding:4px 10px;border-radius:6px;font-size:11px;width:130px;outline:none;transition:border-color 0.2s;"
         onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#475569'"
-        onkeydown="if(event.key==='Enter')searchWO()">
+        onkeydown="if(event.key==='Enter')searchWO()" data-i18n="search_placeholder">
       <button class="btn" onclick="searchWO()" style="padding:2px 8px;font-size:10px;">🔍</button>
     </div>
-    <button class="btn btn-primary" onclick="manualRefresh()">刷新</button>
+    <button class="btn btn-primary" onclick="manualRefresh()" data-i18n="refresh_btn">刷新</button>
   </div>
 </div>
 
@@ -378,7 +378,7 @@ canvas { display: block; background: transparent; }
 <div id="woModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;">
   <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;width:560px;max-width:92vw;max-height:80vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.5);">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #334155;background:#0f172a;border-radius:8px 8px 0 0;">
-      <span style="color:#38bdf8;font-size:14px;font-weight:700;">工单状态查询</span>
+      <span data-i18n="modal_wo" style="color:#38bdf8;font-size:14px;font-weight:700;">工单状态查询</span>
       <button onclick="closeWOModal()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
     </div>
     <div id="woModalBody" style="padding:16px;"></div>
@@ -388,7 +388,7 @@ canvas { display: block; background: transparent; }
 <div id="excModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99999;align-items:center;justify-content:center;">
   <div style="background:#1e293b;border:1px solid #dc2626;border-radius:8px;width:480px;max-width:92vw;max-height:70vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.5);">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #dc262640;background:#7f1d1d;border-radius:8px 8px 0 0;">
-      <span style="color:#fca5a5;font-size:14px;font-weight:700;">异常详情</span>
+      <span data-i18n="modal_exc" style="color:#fca5a5;font-size:14px;font-weight:700;">异常详情</span>
       <button onclick="closeExcModal()" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;">×</button>
     </div>
     <div id="excModalBody" style="padding:16px; color:#e2e8f0; font-size:13px; line-height:1.8;"></div>
@@ -407,11 +407,11 @@ canvas { display: block; background: transparent; }
     <!-- ===== Card 1: 销售 ===== -->
     <div class="section" style="flex:20; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
       <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
-        <div style="font-size:15px; color:#a78bfa;">目标销售：<span id="targetSalesValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
-        <div style="font-size:15px; color:#a78bfa;">完成率：<span id="salesCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#a78bfa;"><span data-i18n="target_sales">目标销售：</span><span id="targetSalesValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#a78bfa;"><span data-i18n="completion_rate">完成率：</span><span id="salesCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
       </div>
       <div style="text-align:center; padding:4px 0 2px; font-size:11px; color:#94a3b8;">
-        已释放销售：<span id="totalSalesDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
+        <span data-i18n="released_sales">已释放销售：</span><span id="totalSalesDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
       </div>
     </div>
 
@@ -421,11 +421,11 @@ canvas { display: block; background: transparent; }
     <!-- ===== Card 2: 工单数量 ===== -->
     <div class="section" style="flex:20; display:flex; flex-direction:column; justify-content:center; padding:10px 12px; margin-right:4px;">
       <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
-        <div style="font-size:15px; color:#38bdf8;">目标工单数量：<span id="targetJobsValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
-        <div style="font-size:15px; color:#38bdf8;">完成率：<span id="jobsCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#38bdf8;"><span data-i18n="target_jobs">目标工单数量：</span><span id="targetJobsValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#38bdf8;"><span data-i18n="completion_rate">完成率：</span><span id="jobsCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
       </div>
       <div style="text-align:center; padding:4px 0 2px; font-size:11px; color:#94a3b8;">
-        已释放工单数量：<span id="totalJobsDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
+        <span data-i18n="released_jobs">已释放工单数量：</span><span id="totalJobsDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
       </div>
     </div>
 
@@ -435,11 +435,11 @@ canvas { display: block; background: transparent; }
     <!-- ===== Card 3: 工时 ===== -->
     <div class="section" style="flex:20; display:flex; flex-direction:column; justify-content:center; padding:10px 12px;">
       <div style="display:flex; justify-content:center; align-items:baseline; gap:16px; padding:0;">
-        <div style="font-size:15px; color:#fb923c;">目标工时：<span id="targetHoursValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
-        <div style="font-size:15px; color:#fb923c;">完成率：<span id="hoursCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#fb923c;"><span data-i18n="target_hours">目标工时：</span><span id="targetHoursValue" style="font-weight:700;color:#e2e8f0;font-size:17px;">-</span></div>
+        <div style="font-size:15px; color:#fb923c;"><span data-i18n="completion_rate">完成率：</span><span id="hoursCompletionRate" style="font-weight:700;font-size:17px;">-</span></div>
       </div>
       <div style="text-align:center; padding:4px 0 2px; font-size:11px; color:#94a3b8;">
-        已释放工单工时：<span id="totalHoursDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
+        <span data-i18n="released_hours">已释放工单工时：</span><span id="totalHoursDisplay" style="font-weight:600;color:#e2e8f0;">-</span>
       </div>
     </div>
 
@@ -449,7 +449,7 @@ canvas { display: block; background: transparent; }
   <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column;">
     <div class="section-header">
       <span style="min-width:60px"></span>
-      <span style="font-size:17px;font-weight:700">工序完成进度</span>
+      <span data-i18n="sec_progress" style="font-size:17px;font-weight:700">工序完成进度</span>
       <span style="min-width:60px"></span>
     </div>
     <div class="section-body" style="padding:4px 8px;flex:1;min-height:0;overflow-y:auto;">
@@ -469,17 +469,17 @@ canvas { display: block; background: transparent; }
           </colgroup>
         <thead>
           <tr>
-            <th>工序</th>
+            <th data-i18n="th_station">工序</th>
             <th class="divider-cell has-line"></th>
-            <th>销售金额</th>
-            <th>销售完成率</th>
+            <th data-i18n="th_sales">销售金额</th>
+            <th data-i18n="th_sales_rate">销售完成率</th>
             <th class="divider-cell has-line"></th>
-            <th>累计完成工单</th>
-            <th>工单进度</th>
+            <th data-i18n="th_cum_jobs">累计完成工单</th>
+            <th data-i18n="th_jobs_progress">工单进度</th>
             <th class="divider-cell has-line"></th>
-            <th>今日完成工时</th>
-            <th>累计完成工时</th>
-            <th>工时进度</th>
+            <th data-i18n="th_today_hours">今日完成工时</th>
+            <th data-i18n="th_cum_hours">累计完成工时</th>
+            <th data-i18n="th_hours_progress">工时进度</th>
           </tr>
         </thead>
         <tbody id="stationBody"></tbody>
@@ -491,7 +491,7 @@ canvas { display: block; background: transparent; }
   <div class="section" style="flex:1;min-height:0;display:flex;flex-direction:column;">
     <div class="section-header">
       <span style="min-width:60px"></span>
-      <span style="font-size:17px;font-weight:700">工序WIP</span>
+      <span data-i18n="sec_wip" style="font-size:17px;font-weight:700">工序WIP</span>
       <span style="min-width:60px"></span>
     </div>
     <div class="section-body" style="padding:4px 8px;flex:1;min-height:0;display:flex;flex-direction:column;">
@@ -507,7 +507,7 @@ const STATION_COLORS = {
   Print:'#38bdf8', Cut:'#4ade80', Pre:'#facc15',
   Asm:'#fb923c', Test:'#f87171', Pack:'#2dd4bf'
 };
-const STATION_CN = {
+let STATION_CN = {
   Print:'工单打印 Print', Cut:'剪线 Cut', Pre:'预处理 Pre',
   Asm:'组装 Asm', Test:'测试 Test', Pack:'包装 Pack'
 };
@@ -516,6 +516,64 @@ const DISPLAY_STATIONS = ['Cut','Pre','Asm','Test','Pack'];
 
 let totalJobCount = 1;
 let currentSite = '310';
+const I18N = {
+  '310': {
+    title:'HMLV生产看板', page_title:'HMLV 生产看板',
+    refresh_label:'自动刷新:', current_time_label:'当前时间:',
+    total_prefix:'共 ', total_suffix:' 条',
+    search_placeholder:'搜工单号...', refresh_btn:'刷新',
+    modal_wo:'工单状态查询', modal_exc:'异常详情',
+    target_sales:'目标销售：', completion_rate:'完成率：', released_sales:'已释放销售：',
+    target_jobs:'目标工单数量：', released_jobs:'已释放工单数量：',
+    target_hours:'目标工时：', released_hours:'已释放工单工时：',
+    sec_progress:'工序完成进度', sec_wip:'工序WIP',
+    th_station:'工序', th_sales:'销售金额', th_sales_rate:'销售完成率',
+    th_cum_jobs:'累计完成工单', th_jobs_progress:'工单进度',
+    th_today_hours:'今日完成工时', th_cum_hours:'累计完成工时', th_hours_progress:'工时进度',
+    wip_no_data:'暂无数据', wip_dwell:'滞留时间', wip_transferred:'已流转',
+    wip_exc_tag:'异常', wip_exc_label:'异常',
+    wo_searching:'查询中...', wo_failed:'查询失败: ', wo_not_found:'未找到工单 ',
+    wo_net_error:'网络错误: ', wo_completed:'已完工', wo_in_progress:'进行中',
+    exc_none:'无', exc_title:'异常 ', exc_station:'工位', exc_desc:'描述', exc_time:'开始时间',
+    stations:{Print:'工单打印 Print',Cut:'剪线 Cut',Pre:'预处理 Pre',Asm:'组装 Asm',Test:'测试 Test',Pack:'包装 Pack'},
+    r30:'30秒',r60:'1分钟',r300:'5分钟',r600:'10分钟',r0:'手动',
+    load_failed:'加载失败: '
+  },
+  '410': {
+    title:'Penang Production Kanban', page_title:'Penang Kanban',
+    refresh_label:'Auto Refresh:', current_time_label:'Time:',
+    total_prefix:'Total: ', total_suffix:' records',
+    search_placeholder:'Search WO...', refresh_btn:'Refresh',
+    modal_wo:'WO Status', modal_exc:'Exception Details',
+    target_sales:'Target Sales:', completion_rate:'Completion:', released_sales:'Released Sales:',
+    target_jobs:'Target Jobs:', released_jobs:'Released Jobs:',
+    target_hours:'Target Hours:', released_hours:'Released Hours:',
+    sec_progress:'Station Progress', sec_wip:'Station WIP',
+    th_station:'Station', th_sales:'Sales Amt', th_sales_rate:'Sales %',
+    th_cum_jobs:'Cum. Jobs', th_jobs_progress:'Jobs %',
+    th_today_hours:'Today Hrs', th_cum_hours:'Cum. Hrs', th_hours_progress:'Hrs %',
+    wip_no_data:'No Data', wip_dwell:'Dwell Time', wip_transferred:'Transferred',
+    wip_exc_tag:'Exc', wip_exc_label:'Exc',
+    wo_searching:'Searching...', wo_failed:'Query Failed: ', wo_not_found:'WO Not Found: ',
+    wo_net_error:'Network Error: ', wo_completed:'Completed', wo_in_progress:'In Progress',
+    exc_none:'None', exc_title:'Exception ', exc_station:'Station', exc_desc:'Description', exc_time:'Start Time',
+    stations:{Print:'Print',Cut:'Cut',Pre:'Pre-treatment',Asm:'Assembly',Test:'Test',Pack:'Pack'},
+    r30:'30s',r60:'1 min',r300:'5 min',r600:'10 min',r0:'Manual',
+    load_failed:'Load Failed: '
+  }
+};
+function t(k){ return (I18N[currentSite]||I18N['310'])[k] || k; }
+function applyI18N(){
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const v=t(el.getAttribute('data-i18n'));
+    if(el.tagName==='INPUT') el.placeholder=v;
+    else if(el.tagName==='OPTION') el.textContent=v;
+    else el.textContent=v;
+  });
+  document.title = t('page_title');
+  STATION_CN = t('stations');
+}
+
 let excelJobsReady = false;  // 标记 excel_jobs 数据是否已加载
 let pendingRenderAll = null; // 缓存 /api/data 返回的 json，等待 excel_jobs 就绪后渲染
 
@@ -538,7 +596,7 @@ function loadData() {
       }
     })
     .catch(e => {
-      document.querySelector('.main').innerHTML = '<div style="background:#7f1d1d;border:1px solid #b91c1c;border-radius:8px;padding:20px;margin:20px;color:#fca5a5">加载失败: ' + e.message + '</div>';
+      document.querySelector('.main').innerHTML = '<div style="background:#7f1d1d;border:1px solid #b91c1c;border-radius:8px;padding:20px;margin:20px;color:#fca5a5">' + t('load_failed') + e.message + '</div>';
     });
 }
 
@@ -773,8 +831,8 @@ document.getElementById('intervalSelect').addEventListener('change', e => {
 
 document.getElementById('siteSelect').addEventListener('change', function() {
   currentSite = this.value;
-  document.querySelector('h1').childNodes[0].textContent =
-    currentSite === '410' ? 'Penang Production Kanban ' : 'HMLV生产看板 ';
+  applyI18N();
+  document.querySelector('h1').childNodes[0].textContent = t('title') + ' ';
   manualRefresh();
 });
 
@@ -937,7 +995,7 @@ function renderWIP(data) {
           <span style="background:${STATION_COLORS[st] || '#94a3b8'}30;color:${STATION_COLORS[st] || '#94a3b8'};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">0</span>
         </div>
         <div class="wip-card-body" style="display:flex;align-items:center;justify-content:center;color:#475569;font-size:11px;padding:20px;text-align:center;">
-          暂无数据
+          ${t('wip_no_data')}
         </div>
       `;
       container.appendChild(card);
@@ -971,8 +1029,8 @@ function renderWIP(data) {
       let rowStyle = isExc ? 'background:#7f1d1d;' : '';
       if (isTransferred) rowStyle += 'opacity:0.85;';
       const dwellColor = isExc ? 'color:#fca5a5;' : (cls === 'warn' ? 'color:#f87171;' : cls === 'mid' ? 'color:#fbbf24;' : 'color:#4ade80;');
-      const dwellText = isTransferred ? '已流转' : dwellStr;
-      const excBtn = isExc ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">异常</span>' : '';
+      const dwellText = isTransferred ? t('wip_transferred') : dwellStr;
+      const excBtn = isExc ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + t('wip_exc_tag') + '</span>' : '';
       rowsHtml += '<div class="wip-row" style="' + rowStyle + '"><span class="wip-col-job" style="' + (isExc ? 'color:#fca5a5;' : '') + '">' + escHtml(j.job) + excBtn + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(j.line || '') + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
     });
 
@@ -980,14 +1038,14 @@ function renderWIP(data) {
       <div class="wip-card-header" style="background:${color}15;color:${color};font-weight:600;">
         <span>${STATION_CN[st] || st}</span>
         <span style="background:${color}30;color:${color};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">${count}</span>
-        ${(stData.exception_count || 0) > 0 ? '<span style="background:#dc2626;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">异常' + stData.exception_count + '</span>' : ''}
+        ${(stData.exception_count || 0) > 0 ? '<span style="background:#dc2626;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">' + t('wip_exc_label') + stData.exception_count + '</span>' : ''}
       </div>
       <div class="wip-card-body">
         <div class="wip-table-header">
           <span class="wip-col-job">JOB</span>
           <span class="wip-col-item">Item</span>
           <span class="wip-col-line">Line</span>
-          <span class="wip-dwell">滞留时间</span>
+          <span class="wip-dwell">${t('wip_dwell')}</span>
         </div>
         ${rowsHtml}
       </div>
@@ -1002,18 +1060,18 @@ function searchWO() {
   const q = (document.getElementById('woSearchInput').value || '').trim();
   if (!q) return;
   const body = document.getElementById('woModalBody');
-  body.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:24px;">查询中...</div>';
+  body.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:24px;">' + t('wo_searching') + '</div>';
   document.getElementById('woModal').style.display = 'flex';
 
   fetch('/api/search_wo?q=' + encodeURIComponent(q) + '&site=' + currentSite + '&t=' + Date.now())
     .then(r => r.json())
     .then(json => {
       if (!json.success) {
-        body.innerHTML = '<div style="color:#f87171;padding:12px;">查询失败: ' + json.error + '</div>';
+        body.innerHTML = '<div style="color:#f87171;padding:12px;">' + t('wo_failed') + json.error + '</div>';
         return;
       }
       if (!json.found || !json.results.length) {
-        body.innerHTML = '<div style="color:#fbbf24;text-align:center;padding:24px;">未找到工单 <strong>' + escHtml(q) + '</strong></div>';
+        body.innerHTML = '<div style="color:#fbbf24;text-align:center;padding:24px;">' + t('wo_not_found') + '<strong>' + escHtml(q) + '</strong></div>';
         return;
       }
 
@@ -1024,7 +1082,9 @@ function searchWO() {
 
       let html = '';
       json.results.forEach(r => {
-        const statusColor = r.current_status === '已完工' ? '#4ade80' : r.current_status === '进行中' ? '#fb923c' : '#94a3b8';
+        const isCompleted = r.current_status === t('wo_completed') || r.current_status === '已完工';
+        const isInProgress = r.current_status === t('wo_in_progress') || r.current_status === '进行中';
+        const statusColor = isCompleted ? '#4ade80' : isInProgress ? '#fb923c' : '#94a3b8';
         const lineTag = r.line ? `<span style="color:#a78bfa;font-size:11px;background:#a78bfa22;padding:1px 8px;border-radius:8px;margin-left:8px;">${escHtml(r.line)}</span>` : '';
         html += `<div style="margin-bottom:20px;border:1px solid #334155;border-radius:6px;overflow:hidden;">
           <div style="padding:8px 12px;background:#0f172a;display:flex;justify-content:space-between;align-items:center;">
@@ -1055,7 +1115,7 @@ function searchWO() {
       body.innerHTML = html;
     })
     .catch(e => {
-      body.innerHTML = '<div style="color:#f87171;padding:12px;">网络错误: ' + e.message + '</div>';
+      body.innerHTML = '<div style="color:#f87171;padding:12px;">' + t('wo_net_error') + e.message + '</div>';
     });
 }
 
@@ -1100,14 +1160,14 @@ function showExcModal(job) {
   var body = document.getElementById('excModalBody');
   var html = '<div style="margin-bottom:12px;padding:10px;background:#0f172a;border-radius:6px;border-left:3px solid #dc2626;">';
   html += '<div style="color:#e2e8f0;font-weight:700;font-size:15px;margin-bottom:6px;">' + escHtml(job) + '</div>';
-  html += '<div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">Item: ' + escHtml(itemText || '无') + ' &nbsp;|&nbsp; Line: ' + escHtml(lineText || '无') + '</div>';
+  html += '<div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">Item: ' + escHtml(itemText || t('exc_none')) + ' &nbsp;|&nbsp; Line: ' + escHtml(lineText || t('exc_none')) + '</div>';
   html += '</div>';
   excList.forEach(function(e, idx) {
     html += '<div style="padding:10px;background:#7f1d1d22;border-radius:6px;margin-bottom:8px;border-left:3px solid #dc2626;">';
-    html += '<div style="color:#fca5a5;font-weight:600;margin-bottom:6px;">\u26a0 异常 ' + (idx + 1) + '</div>';
-    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">工位</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
-    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">描述</span><span style="color:#fca5a5;">' + escHtml(e.description) + '</span></div>';
-    html += '<div><span style="color:#94a3b8;display:inline-block;width:70px;">开始时间</span><span style="color:#e2e8f0;">' + escHtml(e.start_time) + '</span></div>';
+    html += '<div style="color:#fca5a5;font-weight:600;margin-bottom:6px;">\u26a0 ' + t('exc_title') + (idx + 1) + '</div>';
+    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_station') + '</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
+    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_desc') + '</span><span style="color:#fca5a5;">' + escHtml(e.description) + '</span></div>';
+    html += '<div><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_time') + '</span><span style="color:#e2e8f0;">' + escHtml(e.start_time) + '</span></div>';
     html += '</div>';
   });
   body.innerHTML = html;
@@ -1135,6 +1195,7 @@ loadExcelJobs();
 loadWIP();
 loadSalesTarget();
 startAutoRefresh(300);
+applyI18N();
 </script>
 </body>
 </html>
