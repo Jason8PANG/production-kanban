@@ -352,6 +352,10 @@ canvas { display: block; background: transparent; }
       &nbsp;|&nbsp;
       共 <span id="total_records">--</span> 条
     </div>
+    <select id="siteSelect">
+      <option value="310">HMLV</option>
+      <option value="410">Penang</option>
+    </select>
     <select id="intervalSelect">
       <option value="30">30秒</option>
       <option value="60">1分钟</option>
@@ -511,6 +515,7 @@ const STATION_LIST = ['Print','Cut','Pre','Asm','Test','Pack'];
 const DISPLAY_STATIONS = ['Cut','Pre','Asm','Test','Pack'];
 
 let totalJobCount = 1;
+let currentSite = '310';
 let excelJobsReady = false;  // 标记 excel_jobs 数据是否已加载
 let pendingRenderAll = null; // 缓存 /api/data 返回的 json，等待 excel_jobs 就绪后渲染
 
@@ -521,7 +526,7 @@ let countdown = 30;
 let countdownTimer = null;
 
 function loadData() {
-  fetch('/api/data?t=' + Date.now())
+  fetch('/api/data?t=' + Date.now() + '&site=' + currentSite)
     .then(r => r.json())
     .then(json => {
       if (excelJobsReady) {
@@ -538,7 +543,7 @@ function loadData() {
 }
 
 function loadExcelJobs() {
-  fetch('/api/excel_jobs?t=' + Date.now())
+  fetch('/api/excel_jobs?t=' + Date.now() + '&site=' + currentSite)
     .then(r => r.json())
     .then(json => {
       if (json.success) {
@@ -651,7 +656,7 @@ function renderAsmHoursDisplay(data) {
 
 // ========== 当月目标数据（销售+工单+工时）==========
 function loadSalesTarget() {
-  fetch('/api/sales-target?t=' + Date.now())
+  fetch('/api/sales-target?t=' + Date.now() + '&site=' + currentSite)
     .then(r => r.json())
     .then(json => {
       if (json.success) {
@@ -764,6 +769,13 @@ function startAutoRefresh(sec) {
 
 document.getElementById('intervalSelect').addEventListener('change', e => {
   startAutoRefresh(parseInt(e.target.value));
+});
+
+document.getElementById('siteSelect').addEventListener('change', function() {
+  currentSite = this.value;
+  document.querySelector('h1').childNodes[0].textContent =
+    currentSite === '410' ? 'Penang Production Kanban ' : 'HMLV生产看板 ';
+  manualRefresh();
 });
 
 // ========== Render ==========
@@ -892,7 +904,7 @@ function renderStationTable(stats) {
 
 // ========== WIP ==========
 function loadWIP() {
-  fetch('/api/wip?t=' + Date.now())
+  fetch('/api/wip?t=' + Date.now() + '&site=' + currentSite)
     .then(r => r.json())
     .then(json => {
       if (json.success) {
@@ -993,7 +1005,7 @@ function searchWO() {
   body.innerHTML = '<div style="text-align:center;color:#94a3b8;padding:24px;">查询中...</div>';
   document.getElementById('woModal').style.display = 'flex';
 
-  fetch('/api/search_wo?q=' + encodeURIComponent(q) + '&t=' + Date.now())
+  fetch('/api/search_wo?q=' + encodeURIComponent(q) + '&site=' + currentSite + '&t=' + Date.now())
     .then(r => r.json())
     .then(json => {
       if (!json.success) {

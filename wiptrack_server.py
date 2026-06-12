@@ -7,7 +7,7 @@ WIPTrack 实时数据 API 服务器
 import json
 import pymysql
 from datetime import datetime, date, timedelta
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 import os
 
@@ -19,6 +19,17 @@ MYSQL_PORT = int(os.environ.get('MYSQL_PORT', 33306))
 MYSQL_USER = os.environ.get('MYSQL_USER', 'powerbi')
 MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', '!Q1234567')
 MYSQL_DATABASE = os.environ.get('MYSQL_DATABASE', 'wiptrack')
+
+# --- 站点配置 ---
+SITE_CONFIG = {
+    '310': {'SiteRef': 'NAIGROUP_PROD_310', 'site_ref': 310, 'name': 'HMLV生产看板', 'name_en': 'HMLV Production Kanban'},
+    '410': {'SiteRef': 'NAIGROUP_PROD_410', 'site_ref': 410, 'name': 'Penang生产看板', 'name_en': 'Penang Production Kanban'},
+}
+DEFAULT_SITE = '310'
+
+def get_site_config(site_code):
+    """获取站点配置，无效时fallback到默认310"""
+    return SITE_CONFIG.get(site_code, SITE_CONFIG[DEFAULT_SITE])
 
 STATION_ORDER = ['Print', 'Cut', 'Pre', 'Asm', 'Test', 'Pack']
 STATION_LABEL = {
@@ -198,12 +209,15 @@ def compute_station_jobs_with_cascade(records, station_col, date_col, job_col, n
     return result
 
 
-def get_pack_completed_jobs(month=None):
+def get_pack_completed_jobs(month=None, site_config=None):
     """
     从 production_records 表中获取已完成最后一道工序（包装 Package）的工单集合。
     month: 格式 'YYYY-MM'，不传则返回所有月份的。
+    site_config: 站点配置 {'SiteRef': '...', 'site_ref': ...}
     返回: set of job strings
     """
+    if site_config is None:
+        site_config = SITE_CONFIG[DEFAULT_SITE]
     conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
     cursor = conn.cursor()
     if month:
@@ -211,23 +225,25 @@ def get_pack_completed_jobs(month=None):
             SELECT DISTINCT pr.Job
             FROM production_records pr
             WHERE pr.Station = '包装 Package'
-              AND pr.SiteRef = 'NAIGROUP_PROD_310'
+              AND pr.SiteRef = %s
               AND DATE_FORMAT(pr.CompleteDate, %s) = %s
-        """, ('%Y-%m', month))
+        """, (site_config['SiteRef'], '%Y-%m', month))
     else:
         cursor.execute("""
             SELECT DISTINCT pr.Job
             FROM production_records pr
             WHERE pr.Station = '包装 Package'
-              AND pr.SiteRef = 'NAIGROUP_PROD_310'
-        """)
+              AND pr.SiteRef = %s
+        """, (site_config['SiteRef'],))
     jobs = {str(row[0]).strip().upper() for row in cursor.fetchall()}
     conn.close()
     return jobs
 
 
-def get_erp_schedule():
+def get_erp_schedule(site_config=None):
     """从 erp_data.hmlv_production_schedule 表读取排程数据"""
+    if site_config is None:
+        site_config = SITE_CONFIG[DEFAULT_SITE]
     import pandas as pd
     conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
     cursor = conn.cursor()
@@ -236,8 +252,8 @@ def get_erp_schedule():
                unit_price, sales_amount, job_status, tested_qty, wo_total,
                cycle_time_h
         FROM erp_data.hmlv_production_schedule
-        WHERE site_ref = 310
-    """)
+        WHERE site_ref = %s
+    """, (site_config['site_ref'],))
     columns = [col[0] for col in cursor.description]
     rows_raw = cursor.fetchall()
     conn.close()
@@ -265,10 +281,12 @@ def get_erp_schedule():
     return df
 
 
-def get_data():
+def get_data(site_config=None):
+    if site_config is None:
+        site_config = SITE_CONFIG[DEFAULT_SITE]
     conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM production_records WHERE SiteRef = 'NAIGROUP_PROD_310' ORDER BY id")
+    cursor.execute("SELECT * FROM production_records WHERE SiteRef = %s ORDER BY id", (site_config['SiteRef'],))
     columns = [col[0] for col in cursor.description]
     rows_raw = cursor.fetchall()
     conn.close()
@@ -313,11 +331,14 @@ def get_data():
 @app.route('/api/data')
 def api_data():
     try:
+        site = request.args.get('site', DEFAULT_SITE)
+        cfg = get_site_config(site)
+
         import pandas as pd
-        columns, rows = get_data()
+        columns, rows = get_data(cfg)
 
         # 加载 ERP 排程数据（用于当月工单数计算）
-        df_all = get_erp_schedule()
+        df_all = get_erp_schedule(cfg)
 
         # 找关键字段
         col_lower = [c.lower() for c in columns]
@@ -503,16 +524,19 @@ def api_excel_jobs():
         import pandas as pd
         from datetime import date
 
+        site = request.args.get('site', DEFAULT_SITE)
+        cfg = get_site_config(site)
+
         # ========== 从数据库读取生产排程数据 ==========
-        df_all = get_erp_schedule()
+        df_all = get_erp_schedule(cfg)
         now_month = date.today().strftime('%Y-%m')
 
         # 当月数据
         df_this = df_all[df_all['_month'] == now_month]
 
         # ========== 获取当月已完成（包装Package完成）的工单集合 ==========
-        pack_completed_all = get_pack_completed_jobs()  # 所有月份
-        pack_completed_this_month = get_pack_completed_jobs(now_month)  # 当月
+        pack_completed_all = get_pack_completed_jobs(site_config=cfg)  # 所有月份
+        pack_completed_this_month = get_pack_completed_jobs(now_month, cfg)  # 当月
 
         result = {}
 
@@ -532,7 +556,7 @@ def api_excel_jobs():
         }
 
         # ========== 获取各工序完成的工单集合 ==========
-        columns_pr, records = get_data()
+        columns_pr, records = get_data(cfg)
 
         def find_col(*names):
             for n in names:
@@ -674,54 +698,54 @@ def api_excel_jobs():
         cursor_hours.execute("""
             SELECT SUM(ps.qty * ps.cycle_time_h)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE ps.site_ref = 310
+            WHERE ps.site_ref = %s
               AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
-                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+                    AND pr.SiteRef = %s
                     AND DATE_FORMAT(pr.CompleteDate, %s) = %s
               )
-        """, ('%Y-%m', now_month, '%Y-%m', now_month))
+        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef'], '%Y-%m', now_month))
         completed_asm_hours = round(float(cursor_hours.fetchone()[0] or 0), 2)
         cursor_hours.execute("""
             SELECT COUNT(DISTINCT ps.job)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE ps.site_ref = 310
+            WHERE ps.site_ref = %s
               AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
-                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+                    AND pr.SiteRef = %s
                     AND DATE_FORMAT(pr.CompleteDate, %s) = %s
               )
-        """, ('%Y-%m', now_month, '%Y-%m', now_month))
+        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef'], '%Y-%m', now_month))
         completed_asm_count = cursor_hours.fetchone()[0] or 0
 
         # 未完成工时：ship_date在当月 且 未完成 Package
         cursor_hours.execute("""
             SELECT SUM(ps.qty * ps.cycle_time_h)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE ps.site_ref = 310
+            WHERE ps.site_ref = %s
               AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci NOT IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
-                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+                    AND pr.SiteRef = %s
               )
-        """, ('%Y-%m', now_month))
+        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef']))
         pending_asm_hours = round(float(cursor_hours.fetchone()[0] or 0), 2)
         cursor_hours.execute("""
             SELECT COUNT(DISTINCT ps.job)
             FROM erp_data.hmlv_production_schedule ps
-            WHERE ps.site_ref = 310
+            WHERE ps.site_ref = %s
               AND DATE_FORMAT(ps.ship_date, %s) = %s
               AND ps.job COLLATE utf8mb4_unicode_ci NOT IN (
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
-                    AND pr.SiteRef = 'NAIGROUP_PROD_310'
+                    AND pr.SiteRef = %s
               )
-        """, ('%Y-%m', now_month))
+        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef']))
         pending_asm_count = cursor_hours.fetchone()[0] or 0
 
         conn_hours.close()
@@ -811,6 +835,9 @@ def api_wip():
     try:
         import pandas as pd
 
+        site = request.args.get('site', DEFAULT_SITE)
+        cfg = get_site_config(site)
+
         conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
         cursor = conn.cursor()
 
@@ -822,10 +849,11 @@ def api_wip():
             '组装': 'Asm', '测试': 'Test', '包装': 'Pack'
         }
 
-        # 获取310站点所有记录（只统计310站点的数据）
+        # 获取站点所有记录
         cursor.execute(
             "SELECT Job, Station, CompleteDate FROM production_records "
-            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND CompleteDate IS NOT NULL"
+            "WHERE SiteRef = %s AND CompleteDate IS NOT NULL",
+            (cfg['SiteRef'],)
         )
         rows = cursor.fetchall()
         # 不关闭连接，后面还要查异常表
@@ -861,7 +889,7 @@ def api_wip():
         job_line_map = {}
         try:
             import pandas as pd
-            df_erp = get_erp_schedule()
+            df_erp = get_erp_schedule(cfg)
             for _, row in df_erp.iterrows():
                 j = str(row['job']).strip()
                 if not j or j == 'nan':
@@ -881,7 +909,8 @@ def api_wip():
         try:
             cursor.execute(
                 "SELECT Station, Job, description, start_time FROM wip_exceptions "
-                "WHERE SiteRef = 'NAIGROUP_PROD_310' AND end_time IS NULL"
+                "WHERE SiteRef = %s AND end_time IS NULL",
+                (cfg['SiteRef'],)
             )
             exc_rows = cursor.fetchall()
             for er in exc_rows:
@@ -915,7 +944,7 @@ def api_wip():
         month_jobs = set()
         try:
             import pandas as pd
-            df_erp = get_erp_schedule()
+            df_erp = get_erp_schedule(cfg)
             df_this_month = df_erp[df_erp['_month'] == current_month]
             month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().str.upper().unique())
         except Exception as e:
@@ -984,10 +1013,12 @@ def api_search_wo():
     参数: q=工单号（支持模糊匹配，不区分大小写）
     返回: 该工单在各工序的完成情况及当前所处阶段
     """
-    from flask import request as flask_request
-    q = (flask_request.args.get('q') or '').strip().upper()
+    q = (request.args.get('q') or '').strip().upper()
     if not q:
         return jsonify({'success': False, 'error': '请输入工单号'})
+
+    site = request.args.get('site', DEFAULT_SITE)
+    cfg = get_site_config(site)
 
     try:
         conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
@@ -996,8 +1027,8 @@ def api_search_wo():
         # 用 LIKE 模糊匹配工单号（Job 字段），同时过滤 SiteRef
         cursor.execute(
             "SELECT Job, Station, CompleteDate FROM production_records "
-            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND LOWER(Job) LIKE %s ORDER BY CompleteDate",
-            ('%' + q.lower() + '%',)
+            "WHERE SiteRef = %s AND LOWER(Job) LIKE %s ORDER BY CompleteDate",
+            (cfg['SiteRef'], '%' + q.lower() + '%')
         )
         rows = cursor.fetchall()
         conn.close()
@@ -1009,7 +1040,7 @@ def api_search_wo():
         job_line_map = {}
         try:
             import pandas as pd
-            df_erp = get_erp_schedule()
+            df_erp = get_erp_schedule(cfg)
             for _, row in df_erp.iterrows():
                 j = str(row['job']).strip()
                 if not j or j == 'nan':
@@ -1094,6 +1125,8 @@ def api_sales_target():
     """从数据库读取销售目标、工单目标、工时目标数据"""
     try:
         now_month = date.today().strftime('%Y-%m')
+        site = request.args.get('site', DEFAULT_SITE)
+        cfg = get_site_config(site)
 
         conn_erp = pymysql.connect(
             host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER,
@@ -1102,7 +1135,10 @@ def api_sales_target():
         )
         cursor = conn_erp.cursor()
 
-        cursor.execute('SELECT target_month, target_amount, target_order_qty, target_total_hours FROM hmlv_sales_target_v2 WHERE siteref=310 ORDER BY target_month')
+        cursor.execute(
+            'SELECT target_month, target_amount, target_order_qty, target_total_hours FROM hmlv_sales_target_v2 WHERE siteref=%s ORDER BY target_month',
+            (cfg['site_ref'],)
+        )
         rows = cursor.fetchall()
 
         target_amount = 0.0
@@ -1149,13 +1185,16 @@ def api_hours_daily():
         import pandas as pd
         from calendar import monthrange
 
+        site = request.args.get('site', DEFAULT_SITE)
+        cfg = get_site_config(site)
+
         year, month = date.today().year, date.today().month
         days_in_month = monthrange(year, month)[1]
         today_day = date.today().day
 
         # ========== 总目标工时（从数据库 erp_data.hmlv_production_schedule 计算）==========
         # ★ 仅统计ship_date在当前月份的工单，使用 work_hours_h（工单总工时）
-        df_erp = get_erp_schedule()
+        df_erp = get_erp_schedule(cfg)
         now_month_daily = date.today().strftime('%Y-%m')
         df_this_month_daily = df_erp[df_erp['_month'] == now_month_daily]
         # ★ 按 job 去重，避免重复记录导致目标工时翻倍
@@ -1208,8 +1247,8 @@ def api_hours_daily():
         current_month = date.today().strftime('%Y-%m')
         cursor.execute(
             "SELECT Job, Station, CompleteDate FROM production_records "
-            "WHERE SiteRef = 'NAIGROUP_PROD_310' AND CompleteDate IS NOT NULL AND CompleteDate LIKE %s",
-            (current_month + '%',)
+            "WHERE SiteRef = %s AND CompleteDate IS NOT NULL AND CompleteDate LIKE %s",
+            (cfg['SiteRef'], current_month + '%')
         )
         rows = cursor.fetchall()
         conn.close()
