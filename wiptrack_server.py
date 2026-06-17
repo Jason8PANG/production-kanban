@@ -252,8 +252,10 @@ def get_erp_schedule(site_config=None):
                unit_price, sales_amount, job_status, tested_qty, wo_total,
                cycle_time_h
         FROM erp_data.hmlv_production_schedule
-        WHERE site_ref = %s
-    """, (site_config['site_ref'],))
+        WHERE site_ref = %s OR (site_ref IS NULL AND NOT EXISTS (
+            SELECT 1 FROM erp_data.hmlv_production_schedule WHERE site_ref = %s
+        ))
+    """, (site_config['site_ref'], site_config['site_ref']))
     columns = [col[0] for col in cursor.description]
     rows_raw = cursor.fetchall()
     conn.close()
@@ -267,17 +269,32 @@ def get_erp_schedule(site_config=None):
         data.append(row_dict)
     
     df = pd.DataFrame(data)
-    # 统一 job 列为大写，避免大小写不匹配
-    df['job'] = df['job'].astype(str).str.strip().str.upper()
-    df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
-    df['tested_qty'] = pd.to_numeric(df['tested_qty'], errors='coerce').fillna(0).astype(int)
-    df['wo_total'] = pd.to_numeric(df['wo_total'], errors='coerce').fillna(0).astype(int)
-    df['sales_amount'] = pd.to_numeric(df['sales_amount'], errors='coerce').fillna(0)
-    df['unit_price'] = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
-    df['work_hours_h'] = pd.to_numeric(df['work_hours_h'], errors='coerce').fillna(0)
-    df['cycle_time_h'] = pd.to_numeric(df['cycle_time_h'], errors='coerce').fillna(0)
-    df['_dt'] = pd.to_datetime(df['ship_date'], errors='coerce')
-    df['_month'] = df['_dt'].dt.strftime('%Y-%m')
+    if df.empty:
+        # 空结果：创建带必要列的 DataFrame，避免后续 KeyError
+        df = pd.DataFrame(columns=['job', 'item', 'qty', 'ship_date', 'line',
+                                   'work_hours_h', 'unit_price', 'sales_amount',
+                                   'job_status', 'tested_qty', 'wo_total', 'cycle_time_h'])
+        df['qty'] = pd.Series(dtype='int')
+        df['tested_qty'] = pd.Series(dtype='int')
+        df['wo_total'] = pd.Series(dtype='int')
+        df['sales_amount'] = pd.Series(dtype='float')
+        df['unit_price'] = pd.Series(dtype='float')
+        df['work_hours_h'] = pd.Series(dtype='float')
+        df['cycle_time_h'] = pd.Series(dtype='float')
+        df['_dt'] = pd.Series(dtype='datetime64[ns]')
+        df['_month'] = pd.Series(dtype='str')
+    else:
+        # 统一 job 列为大写，避免大小写不匹配
+        df['job'] = df['job'].astype(str).str.strip().str.upper()
+        df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
+        df['tested_qty'] = pd.to_numeric(df['tested_qty'], errors='coerce').fillna(0).astype(int)
+        df['wo_total'] = pd.to_numeric(df['wo_total'], errors='coerce').fillna(0).astype(int)
+        df['sales_amount'] = pd.to_numeric(df['sales_amount'], errors='coerce').fillna(0)
+        df['unit_price'] = pd.to_numeric(df['unit_price'], errors='coerce').fillna(0)
+        df['work_hours_h'] = pd.to_numeric(df['work_hours_h'], errors='coerce').fillna(0)
+        df['cycle_time_h'] = pd.to_numeric(df['cycle_time_h'], errors='coerce').fillna(0)
+        df['_dt'] = pd.to_datetime(df['ship_date'], errors='coerce')
+        df['_month'] = df['_dt'].dt.strftime('%Y-%m')
     return df
 
 
@@ -431,62 +448,109 @@ def api_data():
             for k, v in daily.items()
         ], key=lambda x: x['date'])
 
-        # ---- 工序甘特/流程 WIP（基于当月排产 JOB）----
-        # 在制品：已打印但尚未到达该工序完成的工单
+        # ---- 工序甘特/流程 WIP（基于 production_records，不限出货月份）----
+        # 以 production_records 为基准：所有有生产记录的工单
+        all_prod_jobs = set()
+        station_done_all = {s: set() for s in STATION_ORDER}
+        # 记录每道工序每个工单的最早完成时间（用于滞留计算）
+        station_job_dates = {s: {} for s in STATION_ORDER}  # station → {job: earliest_date}
+        for r in rows:
+            job = str(r.get(job_col, '') or '').strip().upper()
+            all_prod_jobs.add(job)
+            sv = str(r.get(station_col, '') or '').strip()
+            station_en = STATION_CN_TO_KEY.get(sv, '')
+            if station_en in STATION_ORDER:
+                station_done_all[station_en].add(job)
+                dv = str(r.get(date_col, '') or '').strip()
+                if dv:
+                    try:
+                        dt = datetime.strptime(dv[:10], '%Y-%m-%d')
+                        if job not in station_job_dates[station_en] or dt < station_job_dates[station_en][job]:
+                            station_job_dates[station_en][job] = dt
+                    except:
+                        pass
+
+        # 加载排产表 Item/Line 映射
+        job_item_map_data = {}
+        job_line_map_data = {}
+        try:
+            for _, row in df_all.iterrows():
+                j = str(row['job']).strip().upper()
+                if not j or j == 'nan':
+                    continue
+                item = str(row['item']).strip() if pd.notna(row['item']) else ''
+                if item and item != 'nan':
+                    job_item_map_data[j] = item
+                line = str(row['line']).strip() if pd.notna(row['line']) else ''
+                if line and line != 'nan':
+                    job_line_map_data[j] = line
+        except Exception:
+            pass
+
+        base_all = len(all_prod_jobs) if len(all_prod_jobs) > 0 else 1
+
         wip_by_station = []
+        today = datetime.now()
         for i, s in enumerate(STATION_ORDER):
             # 在制品 = 前一道工序完成的工单数 - 当前工序完成的工单数
             if i == 0:
-                # 第一道工序：WIP = 当月工单总数 - 当前工序完成数
-                prev_done = base  # base = 当月排产工单总数
+                prev_done = base_all
+                prev_s_key = None
             else:
                 prev_s = STATION_ORDER[i-1]
-                prev_done = len(station_done_map[prev_s])
+                prev_done = len(station_done_all[prev_s])
+                prev_s_key = prev_s
 
-            cur_done = len(station_done_map[s])
+            cur_done = len(station_done_all[s])
             wip = max(0, prev_done - cur_done)
 
             # ---- 计算滞留天数 ----
             # 滞留工单：已完成前一道工序但尚未完成当前工序的工单
-            prev_jobs_set = station_done_map[STATION_ORDER[i-1]] if i > 0 else month_jobs_erp
-            cur_jobs_set = station_done_map[s]
+            prev_jobs_set = station_done_all[prev_s_key] if prev_s_key else all_prod_jobs
+            cur_jobs_set = station_done_all[s]
             滞留_jobs = prev_jobs_set - cur_jobs_set
+
+            滞留_details = []
+            total_days = 0
+            count_with_date = 0
             
-            if len(滞留_jobs) > 0:
-                # 计算平均滞留天数
-                total_days = 0
-                count_with_date = 0
-                for job_id in 滞留_jobs:
-                    # 查找该工单在前一道工序的完成日期
-                    prev_complete_date = None
-                    for r in rows:
-                        sv = str(r.get(station_col, '') or '').strip()
-                        dv = str(r.get(date_col, '') or '').strip()
-                        j = r.get(job_col)
-                        if sv == (STATION_ORDER[i-1] if i > 0 else 'Print') and dv and str(j).strip() == str(job_id).strip():
-                            try:
-                                prev_complete_date = datetime.strptime(dv[:10], '%Y-%m-%d')
-                                break
-                            except:
-                                pass
-                    
-                    if prev_complete_date:
-                        # 计算到今天的滞留工作日天数（排除周六和周日）
-                        today = datetime.now()
-                        days = count_workdays(prev_complete_date, today)
-                        total_days += days
-                        count_with_date += 1
+            for job_id in 滞留_jobs:
+                # 获取前一道工序完成日期
+                prev_complete_date = None
+                if prev_s_key:
+                    prev_complete_date = station_job_dates.get(prev_s_key, {}).get(job_id)
                 
-                avg_days = round(total_days / count_with_date, 1) if count_with_date > 0 else 0
-            else:
-                avg_days = 0
+                if prev_complete_date:
+                    days = count_workdays(prev_complete_date, today)
+                    total_days += days
+                    count_with_date += 1
+                    dwell_hours = round(days * 8, 1)
+                    complete_str = prev_complete_date.strftime('%Y-%m-%d')
+                else:
+                    dwell_hours = 0
+                    complete_str = ''
+                
+                滞留_details.append({
+                    'job': job_id,
+                    'item': job_item_map_data.get(job_id, ''),
+                    'line': job_line_map_data.get(job_id, ''),
+                    'prev_complete': complete_str,
+                    'dwell_hours': dwell_hours,
+                    'dwell_days': days if prev_complete_date else 0,
+                })
+            
+            # 按滞留时间降序
+            滞留_details.sort(key=lambda x: -x.get('dwell_hours', 0))
+            
+            avg_days = round(total_days / count_with_date, 1) if count_with_date > 0 else 0
             
             wip_by_station.append({
                 'station': s,
                 'label': STATION_LABEL.get(s, s),
                 'wip': wip,
                 '滞留_count': len(滞留_jobs),
-                '滞留_avg_days': avg_days
+                '滞留_avg_days': avg_days,
+                '滞留_details': 滞留_details,
             })
 
         # ---- 最近 50 条工单明细 ----
@@ -932,30 +996,15 @@ def api_wip():
         conn.close()
 
         now = datetime.now()
-        # 当月范围（动态计算）
-        year, month = now.year, now.month
-        current_month = now.strftime('%Y-%m')
-        month_start = datetime(year, month, 1)
-        import calendar
-        days_in_month = calendar.monthrange(year, month)[1]
-        month_end = datetime(year, month, days_in_month, 23, 59, 59)
 
-        # ★ 当月排产 JOB（ship_date 在当月）— 从 ERP 排产表获取
-        month_jobs = set()
-        try:
-            import pandas as pd
-            df_erp = get_erp_schedule(cfg)
-            df_this_month = df_erp[df_erp['_month'] == current_month]
-            month_jobs = set(df_this_month['job'].dropna().astype(str).str.strip().str.upper().unique())
-        except Exception as e:
-            print(f"[WARN] WIP schedule data load failed: {e}")
-            month_jobs = set()
+        # ★ 全部有生产记录的工单（不限出货月份）— 以 production_records 为基准
+        all_prod_jobs_wip = set(job_station_time.keys())
 
         result = {}
 
         # 对每个工序（跳过第一道"工单打印"）：
-        # - 完成数：该工序在当月完成
-        # - 滞留数：有当月记录的工单中，上道工序在当月完成但当前工序未完成
+        # - 完成数：该工序已完成
+        # - 滞留数：上道工序已完成但当前工序未完成（以 production_records 为基准）
         for i, station_cn in enumerate(STATION_ORDER_CN):
             if i == 0:
                 continue  # 工单打印不需要 WIP
@@ -965,9 +1014,9 @@ def api_wip():
 
             done_in_month = 0
             wip_list = []
-            for job in month_jobs:  # 只看当月排产 JOB
+            for job in all_prod_jobs_wip:
                 stations = job_station_time.get(job, {})
-                # 完成数：当月排产 JOB 已完成该工序（不限完成月份）
+                # 完成数：有生产记录的工单已完成该工序
                 if station_en in stations:
                     done_in_month += 1
                 # 滞留数：上道工序已完成但当前工序未完成
@@ -993,8 +1042,8 @@ def api_wip():
 
             result[station_en] = {
                 'label': station_cn,
-                'count': len(wip_list),  # 5月滞留数
-                'done_in_month': done_in_month,      # 当月完成数（新增）
+                'count': len(wip_list),  # 滞留数
+                'done_in_month': done_in_month,      # 全部完成数
                 'exception_count': exc_count,         # 异常工单数（新增）
                 'jobs': wip_list
             }
