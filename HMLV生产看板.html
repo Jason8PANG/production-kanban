@@ -263,44 +263,46 @@ canvas { display: block; background: transparent; }
 .wip-card-body::-webkit-scrollbar { width: 3px; }
 .wip-card-body::-webkit-scrollbar-track { background: transparent; }
 .wip-card-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+/* WIP表格 — 使用table布局保证列对齐（table-layout:fixed以表头为准） */
+.wip-table { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; }
+.wip-table-header { display: table-header-group; }
+.wip-table-body { display: table-row-group; }
 .wip-row {
-  display: flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-bottom: 1px solid rgba(30, 41, 59, 0.4);
-  gap: 4px;
+  display: table-row;
   transition: background 0.15s;
   font-size: 8px;
-  min-height: 19px;
 }
 .wip-row:hover { background: rgba(30, 41, 59, 0.6); }
-.wip-row:last-child { border-bottom: none; }
-.wip-col-job { color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 3 1 0; min-width: 55px; max-width: 120px; text-align: center; font-size: 9px; }
-.wip-col-item { color: #94a3b8; flex: 4 1 0; min-width: 50px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 9px; }
-.wip-dwell { font-weight: 600; white-space: nowrap; flex: 0 0 auto; min-width: 45px; text-align: center; font-size: 9px; }
+.wip-row:last-child .wip-col-job,
+.wip-row:last-child .wip-col-item,
+.wip-row:last-child .wip-col-line,
+.wip-row:last-child .wip-dwell { border-bottom: none; }
+.wip-table-header .wip-col-job,
+.wip-table-header .wip-col-item,
+.wip-table-header .wip-col-line,
+.wip-table-header .wip-dwell {
+  color: #475569;
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
+}
+.wip-col-job { display: table-cell; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; text-align: center; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
+.wip-col-item { display: table-cell; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
+.wip-col-line { display: table-cell; color: #a78bfa; font-size: 7px; white-space: nowrap; text-align: center; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
+.wip-dwell { display: table-cell; font-weight: 600; white-space: nowrap; text-align: center; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
 .wip-dwell.warn { color: #f87171; }
 .wip-dwell.ok { color: #4ade80; }
 .wip-dwell.mid { color: #fbbf24; }
 
-.wip-table-header {
-  display: flex;
-  align-items: center;
-  padding: 2px 8px;
-  gap: 4px;
-  color: #475569;
-  font-size: 8px;
-  font-weight: 600;
-  border-bottom: 1px solid rgba(51, 65, 85, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+/* 格子竖线 */
+.wip-col-job, .wip-col-item, .wip-col-line, .wip-dwell {
+  border-left: 1px solid rgba(100, 116, 139, 0.5);
+  border-right: 1px solid rgba(100, 116, 139, 0.5);
 }
-.wip-table-header .wip-col-job,
-.wip-row .wip-col-job { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
-.wip-table-header .wip-col-item,
-.wip-row .wip-col-item { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
-.wip-table-header .wip-col-line,
-.wip-row .wip-col-line { border-right: 1px solid rgba(51, 65, 85, 0.3); padding-right: 6px; }
-.wip-col-line { color: #a78bfa; font-size: 7px; white-space: nowrap; flex: 1 1 0; min-width: 24px; text-align: center; }
+.wip-col-job { border-left: none; }
+.wip-dwell { border-right: none; }
 
 /* KPI Card Glow */
 .kpi-card {
@@ -1041,13 +1043,15 @@ function renderWIP(data) {
         ${(stData.exception_count || 0) > 0 ? '<span style="background:#dc2626;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">' + t('wip_exc_label') + stData.exception_count + '</span>' : ''}
       </div>
       <div class="wip-card-body">
-        <div class="wip-table-header">
-          <span class="wip-col-job">JOB</span>
-          <span class="wip-col-item">Item</span>
-          <span class="wip-col-line">Line</span>
-          <span class="wip-dwell">${t('wip_dwell')}</span>
+        <div class="wip-table">
+          <div class="wip-table-header">
+            <span class="wip-col-job" style="width:30%;">JOB</span>
+            <span class="wip-col-item" style="width:36%;">Item</span>
+            <span class="wip-col-line" style="width:14%;">Line</span>
+            <span class="wip-dwell" style="width:20%;">${t('wip_dwell')}</span>
+          </div>
+          ${rowsHtml}
         </div>
-        ${rowsHtml}
       </div>
     `;
     container.appendChild(card);
