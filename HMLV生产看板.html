@@ -265,7 +265,7 @@ canvas { display: block; background: transparent; }
 .wip-card-body::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
 /* WIP表格 — 使用table布局保证列对齐（table-layout:fixed以表头为准） */
 .wip-table { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; }
-.wip-table-header { display: table-header-group; }
+.wip-table-header { display: table-header-group; position: sticky; top: 0; z-index: 2; background: #0f172a; }
 .wip-table-body { display: table-row-group; }
 .wip-row {
   display: table-row;
@@ -281,9 +281,9 @@ canvas { display: block; background: transparent; }
 .wip-table-header .wip-col-item,
 .wip-table-header .wip-col-line,
 .wip-table-header .wip-dwell {
-  color: #475569;
-  font-size: 8px;
-  font-weight: 600;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   border-bottom: 1px solid rgba(51, 65, 85, 0.4);
