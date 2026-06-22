@@ -1032,7 +1032,15 @@ function renderWIP(data) {
       if (isTransferred) rowStyle += 'opacity:0.85;';
       const dwellColor = isExc ? 'color:#fca5a5;' : (cls === 'warn' ? 'color:#f87171;' : cls === 'mid' ? 'color:#fbbf24;' : 'color:#4ade80;');
       const dwellText = isTransferred ? t('wip_transferred') : dwellStr;
-      const excBtn = isExc ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + t('wip_exc_tag') + '</span>' : '';
+      // 异常标签：显示第一条异常描述（截断），多条时追加 +N
+      let excBtn = '';
+      let excDescText = '';
+      if (isExc) {
+        const firstDesc = (j.exception[0].description || '').replace(/\n/g, ' ').trim();
+        const suffix = j.exception.length > 1 ? ' +' + (j.exception.length - 1) : '';
+        excDescText = firstDesc.length > 18 ? firstDesc.substring(0, 16) + '..' : firstDesc;
+        excBtn = '<span class="exc-tag" data-job="' + escHtml(j.job) + '" title="' + escHtml(firstDesc) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + escHtml(excDescText + suffix) + '</span>';
+      }
       rowsHtml += '<div class="wip-row" style="' + rowStyle + '"><span class="wip-col-job" style="' + (isExc ? 'color:#fca5a5;' : '') + '">' + escHtml(j.job) + excBtn + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(j.line || '') + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
     });
 
