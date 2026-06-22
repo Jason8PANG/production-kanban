@@ -1080,13 +1080,44 @@ def api_search_wo():
             (cfg['SiteRef'], '%' + q.lower() + '%')
         )
         rows = cursor.fetchall()
-        conn.close()
 
         if not rows:
+            conn.close()
             return jsonify({'success': True, 'found': False, 'q': q, 'results': []})
 
-        # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Line 映射
+        # 收集匹配到的工单号（去重）
+        matched_jobs = list(set(str(r[0]).strip().upper() for r in rows))
+
+        # 查询异常信息（活跃 + 已关闭都查，前端区分显示）
+        exc_by_job = {}
+        if matched_jobs:
+            placeholders = ','.join(['%s'] * len(matched_jobs))
+            cursor.execute(
+                f"SELECT Job, Station, description, start_time, end_time FROM wip_exceptions "
+                f"WHERE SiteRef = %s AND UPPER(Job) IN ({placeholders}) ORDER BY start_time DESC",
+                (cfg['SiteRef'],) + tuple(matched_jobs)
+            )
+            exc_rows = cursor.fetchall()
+            for er in exc_rows:
+                exc_job = str(er[0]).strip().upper()
+                exc_station = str(er[1]).strip()
+                exc_desc = str(er[2]).strip() if er[2] else ''
+                exc_start = parse_complete_date(er[3])
+                exc_end = parse_complete_date(er[4]) if er[4] else None
+                if exc_job not in exc_by_job:
+                    exc_by_job[exc_job] = []
+                exc_by_job[exc_job].append({
+                    'station': exc_station,
+                    'description': exc_desc,
+                    'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else '',
+                    'active': exc_end is None  # True=活跃异常, False=已关闭
+                })
+
+        conn.close()
+
+        # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Line/Item 映射
         job_line_map = {}
+        job_item_map = {}
         try:
             import pandas as pd
             df_erp = get_erp_schedule(cfg)
@@ -1095,8 +1126,11 @@ def api_search_wo():
                 if not j or j == 'nan':
                     continue
                 line = str(row['line']).strip() if pd.notna(row['line']) else ''
+                item = str(row['item']).strip() if pd.notna(row['item']) else ''
                 if line and line != 'nan':
                     job_line_map[j] = line
+                if item and item != 'nan':
+                    job_item_map[j] = item
         except Exception:
             pass
 
@@ -1153,10 +1187,12 @@ def api_search_wo():
 
             results.append({
                 'job': job,
+                'item': job_item_map.get(job, ''),
                 'line': job_line_map.get(job, ''),
                 'current_status': current_status,
                 'current_station': current_station,
-                'steps': steps
+                'steps': steps,
+                'exceptions': exc_by_job.get(job, None)  # None=无异常, list=异常列表
             })
 
         return jsonify({'success': True, 'found': True, 'q': q, 'results': results})

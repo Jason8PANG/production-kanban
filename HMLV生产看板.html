@@ -536,7 +536,7 @@ const I18N = {
     wip_exc_tag:'异常', wip_exc_label:'异常',
     wo_searching:'查询中...', wo_failed:'查询失败: ', wo_not_found:'未找到工单 ',
     wo_net_error:'网络错误: ', wo_completed:'已完工', wo_in_progress:'进行中',
-    exc_none:'无', exc_title:'异常 ', exc_station:'工位', exc_desc:'描述', exc_time:'开始时间',
+    exc_none:'无', exc_title:'异常 ', exc_station:'工位', exc_desc:'描述', exc_time:'开始时间', exc_active:'活跃', exc_resolved:'已解决',
     stations:{Print:'工单打印 Print',Cut:'剪线 Cut',Pre:'预处理 Pre',Asm:'组装 Asm',Test:'测试 Test',Pack:'包装 Pack'},
     r30:'30秒',r60:'1分钟',r300:'5分钟',r600:'10分钟',r0:'手动',
     load_failed:'加载失败: '
@@ -558,7 +558,7 @@ const I18N = {
     wip_exc_tag:'Exc', wip_exc_label:'Exc',
     wo_searching:'Searching...', wo_failed:'Query Failed: ', wo_not_found:'WO Not Found: ',
     wo_net_error:'Network Error: ', wo_completed:'Completed', wo_in_progress:'In Progress',
-    exc_none:'None', exc_title:'Exception ', exc_station:'Station', exc_desc:'Description', exc_time:'Start Time',
+    exc_none:'None', exc_title:'Exception ', exc_station:'Station', exc_desc:'Description', exc_time:'Start Time', exc_active:'Active', exc_resolved:'Resolved',
     stations:{Print:'Print',Cut:'Cut',Pre:'Pre-treatment',Asm:'Assembly',Test:'Test',Pack:'Pack'},
     r30:'30s',r60:'1 min',r300:'5 min',r600:'10 min',r0:'Manual',
     load_failed:'Load Failed: '
@@ -1090,10 +1090,24 @@ function searchWO() {
         const isInProgress = r.current_status === t('wo_in_progress') || r.current_status === '进行中';
         const statusColor = isCompleted ? '#4ade80' : isInProgress ? '#fb923c' : '#94a3b8';
         const lineTag = r.line ? `<span style="color:#a78bfa;font-size:11px;background:#a78bfa22;padding:1px 8px;border-radius:8px;margin-left:8px;">${escHtml(r.line)}</span>` : '';
+        // 异常标签
+        let excHtml = '';
+        if (r.exceptions && r.exceptions.length > 0) {
+          window._excData[r.job] = r.exceptions;
+          const activeCount = r.exceptions.filter(e => e.active).length;
+          const totalCount = r.exceptions.length;
+          const excColor = activeCount > 0 ? '#dc2626' : '#f59e0b';
+          const excText = activeCount > 0 ? (activeCount < totalCount ? `异常 ${activeCount}/${totalCount}` : `异常 ${activeCount}`) : `已解决 ${totalCount}`;
+          excHtml = `<span class="exc-tag" data-job="${escHtml(r.job)}" style="background:${excColor}22;color:${excColor};padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;cursor:pointer;border:1px solid ${excColor}44;">⚠ ${excText}</span>`;
+        }
+        // item 显示
+        const itemText = r.item ? `<span style="color:#94a3b8;font-size:11px;margin-left:8px;">Item: ${escHtml(r.item)}</span>` : '';
         html += `<div style="margin-bottom:20px;border:1px solid #334155;border-radius:6px;overflow:hidden;">
           <div style="padding:8px 12px;background:#0f172a;display:flex;justify-content:space-between;align-items:center;">
-            <span style="color:#e2e8f0;font-size:13px;font-weight:700;">${escHtml(r.job)}${lineTag}</span>
-            <span style="color:${statusColor};font-size:12px;font-weight:600;background:${statusColor}22;padding:2px 10px;border-radius:10px;">${r.current_status} → ${r.current_station}</span>
+            <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;">
+              <span style="color:#e2e8f0;font-size:13px;font-weight:700;">${escHtml(r.job)}</span>${itemText}${lineTag}${excHtml}
+            </div>
+            <span style="color:${statusColor};font-size:12px;font-weight:600;background:${statusColor}22;padding:2px 10px;border-radius:10px;flex-shrink:0;margin-left:8px;">${r.current_status} → ${r.current_station}</span>
           </div>
           <div style="padding:12px 12px 8px;">`;
 
@@ -1152,13 +1166,14 @@ function showExcModal(job) {
   var jobData = null;
   var stations = ['Cut','Pre','Asm','Test','Pack'];
   for (var s = 0; s < stations.length; s++) {
-    var stData = window._wipData[stations[s]];
+    var stData = window._wipData && window._wipData[stations[s]];
     if (!stData || !stData.jobs) continue;
     for (var i = 0; i < stData.jobs.length; i++) {
       if (stData.jobs[i].job === job) { jobData = stData.jobs[i]; break; }
     }
     if (jobData) break;
   }
+  // 如果 _wipData 中找不到（如搜索已完工工单），从异常数据本身提取信息
   var itemText = jobData ? (jobData.item || '') : '';
   var lineText = jobData ? (jobData.line || '') : '';
   var body = document.getElementById('excModalBody');
@@ -1167,8 +1182,13 @@ function showExcModal(job) {
   html += '<div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">Item: ' + escHtml(itemText || t('exc_none')) + ' &nbsp;|&nbsp; Line: ' + escHtml(lineText || t('exc_none')) + '</div>';
   html += '</div>';
   excList.forEach(function(e, idx) {
-    html += '<div style="padding:10px;background:#7f1d1d22;border-radius:6px;margin-bottom:8px;border-left:3px solid #dc2626;">';
-    html += '<div style="color:#fca5a5;font-weight:600;margin-bottom:6px;">\u26a0 ' + t('exc_title') + (idx + 1) + '</div>';
+    var badgeBg = e.active ? '#dc2626' : '#f59e0b';
+    var badgeText = e.active ? t('exc_active') : t('exc_resolved');
+    html += '<div style="padding:10px;background:#7f1d1d22;border-radius:6px;margin-bottom:8px;border-left:3px solid ' + badgeBg + ';">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
+    html += '<span style="color:#fca5a5;font-weight:600;">\u26a0 ' + t('exc_title') + (idx + 1) + '</span>';
+    html += '<span style="background:' + badgeBg + '22;color:' + badgeBg + ';padding:1px 8px;border-radius:8px;font-size:10px;border:1px solid ' + badgeBg + '44;">' + badgeText + '</span>';
+    html += '</div>';
     html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_station') + '</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
     html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_desc') + '</span><span style="color:#fca5a5;">' + escHtml(e.description) + '</span></div>';
     html += '<div><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_time') + '</span><span style="color:#e2e8f0;">' + escHtml(e.start_time) + '</span></div>';
