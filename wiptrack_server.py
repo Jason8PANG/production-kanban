@@ -448,8 +448,8 @@ def api_data():
             for k, v in daily.items()
         ], key=lambda x: x['date'])
 
-        # ---- 工序甘特/流程 WIP（基于 production_records，不限出货月份）----
-        # 以 production_records 为基准：所有有生产记录的工单
+        # ---- 工序甘特/流程 WIP（基于 production_records 全部工单）----
+        # 全部有生产记录的工单，Pack 已完成的自然被 WIP 公式排除
         all_prod_jobs = set()
         station_done_all = {s: set() for s in STATION_ORDER}
         # 记录每道工序每个工单的最早完成时间（用于滞留计算）
@@ -997,7 +997,7 @@ def api_wip():
 
         now = datetime.now()
 
-        # ★ 全部有生产记录的工单（不限出货月份）— 以 production_records 为基准
+        # ★ 全部有生产记录的工单（Pack 已完成的自然被排除）
         all_prod_jobs_wip = set(job_station_time.keys())
 
         result = {}
