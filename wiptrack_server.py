@@ -591,6 +591,18 @@ def api_excel_jobs():
         site = request.args.get('site', DEFAULT_SITE)
         cfg = get_site_config(site)
 
+        # ========== 日期筛选：支持传入指定日期查看当日工序完成情况 ==========
+        date_param = request.args.get('date', '').strip()
+        if date_param:
+            try:
+                from datetime import datetime as dt
+                filter_date = dt.strptime(date_param, '%Y-%m-%d').date()
+            except ValueError:
+                filter_date = date.today()
+        else:
+            filter_date = date.today()
+        filter_date_str = filter_date.strftime('%Y-%m-%d')
+
         # ========== 从数据库读取生产排程数据 ==========
         df_all = get_erp_schedule(cfg)
         now_month = date.today().strftime('%Y-%m')
@@ -669,7 +681,8 @@ def api_excel_jobs():
         # ========== 工序销售金额（以排产表当月 JOB 为准）==========
         STATION_LIST = STATION_ORDER
 
-        # 对当月排产 JOB，统计各工序完成情况（不限完成月份）
+        # 对当月排产 JOB，统计各工序完成情况（截至筛选日期）
+        # 当选择了日期时，只计算 CompleteDate ≤ filter_date 的完成记录
         station_done_for_month = {st: set() for st in STATION_LIST}
         for r in records:
             job = str(r.get(job_col, '') or '').strip().upper()
@@ -678,6 +691,13 @@ def api_excel_jobs():
             sv = str(r.get(station_col, '') or '').strip()
             station_en = STATION_CN_TO_KEY.get(sv, '')
             if station_en in STATION_LIST:
+                # 日期筛选：只计入 CompleteDate ≤ filter_date 的记录
+                dv = str(r.get(date_col, '') or '').strip()
+                if dv:
+                    # 截取日期部分（前10字符 YYYY-MM-DD）
+                    rec_date = dv[:10]
+                    if rec_date > filter_date_str:
+                        continue
                 station_done_for_month[station_en].add(job)
 
         station_sales = {}
@@ -712,15 +732,20 @@ def api_excel_jobs():
             station_hours[st] = round(hours, 2)
         result['station_hours'] = station_hours
 
-        # ========== 每个工序当天完成的工时 ==========
-        # 逻辑：当天工序工时 = 当天完成该工序的所有记录.qty × cycle_time_h 的累加（不去重，每条记录独立计算）
-        today_str_db = date.today().strftime('%Y-%m-%d')
+        # ========== 各工序累计完成工单数（截至筛选日期）==========
+        station_jobs_cum = {}
+        for st in STATION_LIST:
+            station_jobs_cum[st] = len(station_done_for_month[st])
+        result['station_jobs_cum'] = station_jobs_cum
+
+        # ========== 每个工序指定日期完成的工时 ==========
+        # 逻辑：指定日期工序工时 = 该日期完成该工序的所有记录.qty × cycle_time_h 的累加（不去重，每条记录独立计算）
         station_hours_today = {}
         for st in STATION_LIST:
             hours = 0.0
             for r in records:
                 dv = str(r.get(date_col, '') or '').strip()
-                if not dv.startswith(today_str_db):
+                if not dv.startswith(filter_date_str):
                     continue
                 station_cn = str(r.get(station_col, '') or '').strip()
                 station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
@@ -730,6 +755,43 @@ def api_excel_jobs():
                         hours += job_hours_map.get(job, 0)
             station_hours_today[st] = round(hours, 2)
         result['station_hours_today'] = station_hours_today
+
+        # ========== 每个工序指定日期完成的销售（按工单去重）==========
+        station_sales_today = {}
+        for st in STATION_LIST:
+            today_jobs_set = set()
+            for r in records:
+                dv = str(r.get(date_col, '') or '').strip()
+                if not dv.startswith(filter_date_str):
+                    continue
+                station_cn = str(r.get(station_col, '') or '').strip()
+                station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
+                if station_en == st:
+                    job = str(r.get(job_col, '') or '').strip().upper()
+                    if job:
+                        today_jobs_set.add(job)
+            sales = 0.0
+            for job in today_jobs_set:
+                sales += job_sales_map.get(job, 0)
+            station_sales_today[st] = round(sales, 2)
+        result['station_sales_today'] = station_sales_today
+
+        # ========== 每个工序指定日期完成的工单数量（按工单去重）==========
+        station_jobs_today = {}
+        for st in STATION_LIST:
+            today_jobs_set = set()
+            for r in records:
+                dv = str(r.get(date_col, '') or '').strip()
+                if not dv.startswith(filter_date_str):
+                    continue
+                station_cn = str(r.get(station_col, '') or '').strip()
+                station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
+                if station_en == st:
+                    job = str(r.get(job_col, '') or '').strip().upper()
+                    if job:
+                        today_jobs_set.add(job)
+            station_jobs_today[st] = len(today_jobs_set)
+        result['station_jobs_today'] = station_jobs_today
 
         # ========== 销售统计（按 job 去重）==========
         df_this_month_dedup = df_this_month.drop_duplicates(subset=['job'], keep='first')
@@ -884,6 +946,7 @@ def api_excel_jobs():
             station_daily_target[st] = round(daily_target_hours * ratio, 2)
         result['station_daily_target'] = station_daily_target
 
+        result['filter_date'] = filter_date.strftime('%Y-%m-%d')
         return jsonify({'success': True, 'data': result})
 
     except Exception as e:

@@ -36,12 +36,21 @@ body {
 }
 .header h1 {
   font-size: 20px;
+  letter-spacing: 3px;
+  font-weight: 700;
+}
+.header h1 .title-text {
   background: linear-gradient(135deg, #38bdf8, #818cf8);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  letter-spacing: 3px;
+}
+#todayDateLabel {
+  font-size: 22px;
   font-weight: 700;
+  color: #38bdf8;
+  letter-spacing: 1px;
+  white-space: nowrap;
 }
 .header-right {
   display: flex;
@@ -73,6 +82,10 @@ body {
   border-color: #0284c7;
 }
 .btn-primary:hover { background: linear-gradient(135deg, #0369a1, #0284c7); }
+/* 日期筛选框：隐藏浏览器内置的"年/月/日"占位符 */
+#dateFilterInput.no-value::-webkit-datetime-edit { color: transparent; }
+#dateFilterInput::-webkit-datetime-edit { color: #e2e8f0; }
+#dateFilterInput::-webkit-calendar-picker-indicator { filter: invert(1); }
 select {
   background: #1e293b;
   color: #e2e8f0;
@@ -344,7 +357,28 @@ canvas { display: block; background: transparent; }
 <body>
 
 <div class="header">
-  <h1>HMLV生产看板 <span id="todayDateLabel" style="font-weight:400;font-size:16px;color:#94a3b8;margin-left:8px;"></span></h1>
+  <h1><span class="title-text">HMLV生产看板</span></h1>
+  <span id="todayDateLabel"><script>document.write((function(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})())</script></span>
+  <div style="display:flex;align-items:center;gap:4px;">
+    <label style="font-size:11px;color:#38bdf8;" data-i18n="date_filter_label">日期筛选</label>
+    <input id="dateFilterInput" type="date" value="" placeholder="" class="no-value"
+      style="background:rgba(15,23,42,0.8);color:#e2e8f0;caret-color:#ffffff;border:1px solid #475569;padding:4px 8px;border-radius:6px;font-size:11px;width:120px;outline:none;transition:border-color 0.2s;"
+      onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#475569'"
+      onchange="onDateFilterChange(); this.classList.remove('no-value')">
+    <button class="btn" onclick="clearDateFilter()" style="padding:2px 8px;font-size:10px;color:#f87171;" title="清除日期筛选">✕</button>
+  </div>
+  <select id="siteSelect">
+    <option value="310">HMLV</option>
+    <option value="410">Penang</option>
+  </select>
+  <div style="display:flex;align-items:center;gap:4px;">
+    <input id="woSearchInput" type="text" placeholder="搜工单号..." autocomplete="off"
+      style="background:rgba(15,23,42,0.8);color:#e2e8f0;border:1px solid #475569;padding:4px 10px;border-radius:6px;font-size:11px;width:130px;outline:none;transition:border-color 0.2s;"
+      onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#475569'"
+      onkeydown="if(event.key==='Enter')searchWO()" data-i18n="search_placeholder">
+    <button class="btn" onclick="searchWO()" style="padding:2px 8px;font-size:10px;">🔍</button>
+    <button class="btn btn-primary" onclick="manualRefresh()" data-i18n="refresh_btn">刷新</button>
+  </div>
   <div class="header-right">
     <div class="refresh-info">
       <span class="refresh-status" id="refreshDot"></span>
@@ -354,10 +388,6 @@ canvas { display: block; background: transparent; }
       &nbsp;|&nbsp;
       <span data-i18n="total_prefix">共 </span><span id="total_records">--</span><span data-i18n="total_suffix"> 条</span>
     </div>
-    <select id="siteSelect">
-      <option value="310">HMLV</option>
-      <option value="410">Penang</option>
-    </select>
     <select id="intervalSelect">
       <option value="30" data-i18n="r30">30秒</option>
       <option value="60" data-i18n="r60">1分钟</option>
@@ -365,14 +395,6 @@ canvas { display: block; background: transparent; }
       <option value="600" data-i18n="r600">10分钟</option>
       <option value="0" data-i18n="r0">手动</option>
     </select>
-    <div style="display:flex;align-items:center;gap:4px;">
-      <input id="woSearchInput" type="text" placeholder="搜工单号..." autocomplete="off"
-        style="background:rgba(15,23,42,0.8);color:#e2e8f0;border:1px solid #475569;padding:4px 10px;border-radius:6px;font-size:11px;width:130px;outline:none;transition:border-color 0.2s;"
-        onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#475569'"
-        onkeydown="if(event.key==='Enter')searchWO()" data-i18n="search_placeholder">
-      <button class="btn" onclick="searchWO()" style="padding:2px 8px;font-size:10px;">🔍</button>
-    </div>
-    <button class="btn btn-primary" onclick="manualRefresh()" data-i18n="refresh_btn">刷新</button>
   </div>
 </div>
 
@@ -457,25 +479,29 @@ canvas { display: block; background: transparent; }
     <div class="section-body" style="padding:4px 8px;flex:1;min-height:0;overflow-y:auto;">
       <table class="station-table" id="stationTable">
           <colgroup>
-            <col style="width:14%">
-            <col class="divider-col">
-            <col style="width:14%">
             <col style="width:10%">
             <col class="divider-col">
+            <col style="width:8%">
             <col style="width:10%">
-            <col style="width:10%">
+            <col style="width:12%">
             <col class="divider-col">
-            <col style="width:4%">
-            <col style="width:6%">
-            <col style="width:20%">
+            <col style="width:8%">
+            <col style="width:10%">
+            <col style="width:12%">
+            <col class="divider-col">
+            <col style="width:5%">
+            <col style="width:7%">
+            <col style="width:12%">
           </colgroup>
         <thead>
           <tr>
             <th data-i18n="th_station">工序</th>
             <th class="divider-cell has-line"></th>
+            <th data-i18n="th_today_sales">当日完成销售</th>
             <th data-i18n="th_sales">销售金额</th>
             <th data-i18n="th_sales_rate">销售完成率</th>
             <th class="divider-cell has-line"></th>
+            <th data-i18n="th_today_jobs">当日完成工单</th>
             <th data-i18n="th_cum_jobs">累计完成工单</th>
             <th data-i18n="th_jobs_progress">工单进度</th>
             <th class="divider-cell has-line"></th>
@@ -529,9 +555,10 @@ const I18N = {
     target_jobs:'目标工单数量：', released_jobs:'已释放工单数量：',
     target_hours:'目标工时：', released_hours:'已释放工单工时：',
     sec_progress:'工序完成进度', sec_wip:'工序WIP',
-    th_station:'工序', th_sales:'销售金额', th_sales_rate:'销售完成率',
-    th_cum_jobs:'累计完成工单', th_jobs_progress:'工单进度',
+    th_station:'工序', th_today_sales:'当日完成销售', th_sales:'销售金额', th_sales_rate:'销售完成率',
+    th_today_jobs:'当日完成工单', th_cum_jobs:'累计完成工单', th_jobs_progress:'工单进度',
     th_today_hours:'今日完成工时', th_cum_hours:'累计完成工时', th_hours_progress:'工时进度',
+    date_filter_label:'日期筛选',
     wip_no_data:'暂无数据', wip_dwell:'滞留时间', wip_transferred:'已流转',
     wip_exc_tag:'异常', wip_exc_label:'异常',
     wo_searching:'查询中...', wo_failed:'查询失败: ', wo_not_found:'未找到工单 ',
@@ -551,9 +578,10 @@ const I18N = {
     target_jobs:'Target Jobs:', released_jobs:'Released Jobs:',
     target_hours:'Target Hours:', released_hours:'Released Hours:',
     sec_progress:'Station Progress', sec_wip:'Station WIP',
-    th_station:'Station', th_sales:'Sales Amt', th_sales_rate:'Sales %',
-    th_cum_jobs:'Cum. Jobs', th_jobs_progress:'Jobs %',
+    th_station:'Station', th_today_sales:'Today Sales', th_sales:'Sales Amt', th_sales_rate:'Sales %',
+    th_today_jobs:'Today Jobs', th_cum_jobs:'Cum. Jobs', th_jobs_progress:'Jobs %',
     th_today_hours:'Today Hrs', th_cum_hours:'Cum. Hrs', th_hours_progress:'Hrs %',
+    date_filter_label:'Date Filter',
     wip_no_data:'No Data', wip_dwell:'Dwell Time', wip_transferred:'Transferred',
     wip_exc_tag:'Exc', wip_exc_label:'Exc',
     wo_searching:'Searching...', wo_failed:'Query Failed: ', wo_not_found:'WO Not Found: ',
@@ -603,7 +631,12 @@ function loadData() {
 }
 
 function loadExcelJobs() {
-  fetch('/api/excel_jobs?t=' + Date.now() + '&site=' + currentSite)
+  var dateParam = '';
+  var dateInput = document.getElementById('dateFilterInput');
+  if (dateInput && dateInput.value) {
+    dateParam = '&date=' + dateInput.value;
+  }
+  fetch('/api/excel_jobs?t=' + Date.now() + '&site=' + currentSite + dateParam)
     .then(r => r.json())
     .then(json => {
       if (json.success) {
@@ -648,9 +681,26 @@ function loadExcelJobs() {
         if (json.data && json.data.station_hours_today) {
           window._stationHoursToday = json.data.station_hours_today;
         }
+        // 保存各工序当日完成销售
+        if (json.data && json.data.station_sales_today) {
+          window._stationSalesToday = json.data.station_sales_today;
+        }
+        // 保存各工序当日完成工单数量
+        if (json.data && json.data.station_jobs_today) {
+          window._stationJobsToday = json.data.station_jobs_today;
+        }
+        // 保存各工序累计完成工单数（截至筛选日期）
+        if (json.data && json.data.station_jobs_cum) {
+          window._stationJobsCum = json.data.station_jobs_cum;
+        }
         // 保存当月工作日数
         if (json.data && json.data.workdays_in_month) {
           window._workdaysInMonth = json.data.workdays_in_month;
+        }
+        // 保存筛选日期并更新表头
+        if (json.data && json.data.filter_date) {
+          window._filterDate = json.data.filter_date;
+          updateStationHeaders(json.data.filter_date);
         }
 
         // 标记 excel_jobs 数据已就绪
@@ -660,6 +710,11 @@ function loadExcelJobs() {
         renderSalesCards(json.data);
         renderAsmHoursDisplay(json.data);
         renderSalesTarget();  // 销售数据就绪后渲染目标卡片
+
+        // 重新渲染工序完成进度表（日期筛选后累计数据也需要更新）
+        if (_apiJson) {
+          renderAll(_apiJson);
+        }
 
         // 如果有缓存的 /api/data 数据，现在渲染工序表
         if (pendingRenderAll) {
@@ -680,6 +735,7 @@ function loadExcelJobs() {
 }
 
 function renderExcelCards(data) {
+  // 大日期始终显示今天的日期，不受日期筛选影响
   const today = new Date();
   const y = today.getFullYear();
   const mo = String(today.getMonth() + 1).padStart(2, '0');
@@ -834,7 +890,7 @@ document.getElementById('intervalSelect').addEventListener('change', e => {
 document.getElementById('siteSelect').addEventListener('change', function() {
   currentSite = this.value;
   applyI18N();
-  document.querySelector('h1').childNodes[0].textContent = t('title') + ' ';
+  document.querySelector('.title-text').textContent = t('title');
   manualRefresh();
 });
 
@@ -872,6 +928,61 @@ function renderAll(json) {
   }
 }
 
+// ========== 日期筛选相关函数 ==========
+function updateStationHeaders(filterDate) {
+  // 根据筛选日期更新工序完成进度表头中的"当日"列标题
+  var today = new Date();
+  var todayStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  var isToday = (filterDate === todayStr);
+
+  // 格式化日期为显示格式
+  var parts = filterDate.split('-');
+  var displayDate = parts[1] + '/' + parts[2];  // MM/DD 格式
+  var displayDateCN = parseInt(parts[1]) + '月' + parseInt(parts[2]) + '日';
+
+  // 更新表头
+  var thTodaySales = document.querySelector('th[data-i18n="th_today_sales"]');
+  var thTodayJobs = document.querySelector('th[data-i18n="th_today_jobs"]');
+  var thTodayHours = document.querySelector('th[data-i18n="th_today_hours"]');
+
+  if (thTodaySales) {
+    if (isToday) {
+      thTodaySales.textContent = currentLang === 'en' ? 'Today Sales' : '当日完成销售';
+    } else {
+      thTodaySales.textContent = currentLang === 'en' ? displayDate + ' Sales' : displayDateCN + '完成销售';
+    }
+  }
+  if (thTodayJobs) {
+    if (isToday) {
+      thTodayJobs.textContent = currentLang === 'en' ? 'Today Jobs' : '当日完成工单';
+    } else {
+      thTodayJobs.textContent = currentLang === 'en' ? displayDate + ' Jobs' : displayDateCN + '完成工单';
+    }
+  }
+  if (thTodayHours) {
+    if (isToday) {
+      thTodayHours.textContent = currentLang === 'en' ? 'Today Hours' : '今日完成工时';
+    } else {
+      thTodayHours.textContent = currentLang === 'en' ? displayDate + ' Hours' : displayDateCN + '完成工时';
+    }
+  }
+}
+
+function onDateFilterChange() {
+  // 日期选择变化时，重新加载 excel_jobs 数据
+  loadExcelJobs();
+}
+
+function clearDateFilter() {
+  // 清除日期筛选，恢复为当天
+  var dateInput = document.getElementById('dateFilterInput');
+  if (dateInput) {
+    dateInput.value = '';
+    dateInput.classList.add('no-value');
+  }
+  loadExcelJobs();
+}
+
 function renderStationTable(stats) {
   const tbody = document.getElementById('stationBody');
   tbody.innerHTML = '';
@@ -881,16 +992,25 @@ function renderStationTable(stats) {
   const targetJobs = window._targetJobs || 0;        // 目标工单数量（来自 /api/sales-target）
   const targetHours = window._targetHours || 0;      // 目标总工时（来自 /api/sales-target）
 
-  // 从 all.by_station 获取当月完成数
-  const byStation = stats.all?.by_station || {};
+  // 从 all.by_station 或 stationJobsCum 获取累计完成工单数
+  // 当有日期筛选（非今天）时，使用 excel_jobs 返回的 station_jobs_cum（截至筛选日期的累计）
+  // 否则使用 /api/data 返回的 by_station（当天全部累计）
+  var today = new Date();
+  var todayStr = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+  var isFilterToday = (window._filterDate === todayStr);
+
+  const byStationDefault = stats.all?.by_station || {};
+  const byStation = isFilterToday ? byStationDefault : (window._stationJobsCum || byStationDefault);
 
   // 调试：打印数据
-  console.log('[DEBUG] byStation:', byStation);
+  console.log('[DEBUG] byStation:', byStation, 'isFilterToday:', isFilterToday, 'filterDate:', window._filterDate);
   console.log('[DEBUG] 目标值 → 销售:', targetSales, '工单:', targetJobs, '工时:', targetHours);
 
   const stationSales = window._stationSales || {};
   const stationHours = window._stationHours || {};
   const stationHoursToday = window._stationHoursToday || {};
+  const stationSalesToday = window._stationSalesToday || {};
+  const stationJobsToday = window._stationJobsToday || {};
   // 进度条颜色统一使用对应数值列的颜色，不再与时间目标比较
 
   DISPLAY_STATIONS.forEach(st => {
@@ -928,6 +1048,7 @@ function renderStationTable(stats) {
     tr.innerHTML =
       '<td><span class="dot" style="background:' + color + '"></span><strong>' + (STATION_CN[st] || st) + '</strong></td>' +
       '<td class="divider-cell"></td>' +
+      '<td style="color:#a78bfa;font-weight:600;font-size:13px;">' + (stationSalesToday[st] > 0 ? '$' + stationSalesToday[st].toLocaleString('en-US', {minimumFractionDigits: 2}) : '-') + '</td>' +
       '<td style="color:#a78bfa;font-weight:600">' + (salesVal > 0 ? '$' + salesVal.toLocaleString('en-US', {minimumFractionDigits: 2}) : '-') + '</td>' +
       '<td style="display:flex;align-items:center;gap:4px;">' +
         '<span style="font-size:12px;font-weight:600;color:' + salesBarColor + ';min-width:32px;text-align:right;">' + stationSalesRate + '%</span>' +
@@ -937,6 +1058,7 @@ function renderStationTable(stats) {
         '</div>' +
       '</td>' +
       '<td class="divider-cell"></td>' +
+      '<td style="font-weight:600;font-size:13px;">' + (stationJobsToday[st] || 0) + '</td>' +
       '<td><strong>' + all + '</strong></td>' +
       '<td style="display:flex;align-items:center;gap:4px;">' +
         '<span style="font-size:12px;font-weight:600;color:' + jobsBarColor + ';min-width:32px;text-align:right;">' + pct + '%</span>' +
