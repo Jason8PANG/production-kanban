@@ -544,6 +544,20 @@ const DISPLAY_STATIONS = ['Cut','Pre','Asm','Test','Pack'];
 
 let totalJobCount = 1;
 let currentSite = '310';
+// 读取 URL ?site= 参数（支持 310/410）
+(function initSiteFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const siteParam = params.get('site');
+    if (siteParam === '410') {
+      currentSite = '410';
+    } else if (siteParam === '310') {
+      currentSite = '310';
+    }
+  } catch (e) {
+    console.error('解析 URL site 参数失败:', e);
+  }
+})();
 const I18N = {
   '310': {
     title:'HMLV生产看板', page_title:'HMLV 生产看板',
@@ -1336,12 +1350,23 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
+// 根据 URL 参数或默认值初始化站点选择器和标题
+const siteSelect = document.getElementById('siteSelect');
+if (siteSelect) {
+  siteSelect.value = currentSite;
+}
+applyI18N();
+const titleText = document.querySelector('.title-text');
+if (titleText) {
+  titleText.textContent = t('title');
+}
+document.title = t('page_title');
+
 loadData();
 loadExcelJobs();
 loadWIP();
 loadSalesTarget();
 startAutoRefresh(300);
-applyI18N();
 </script>
 </body>
 </html>
