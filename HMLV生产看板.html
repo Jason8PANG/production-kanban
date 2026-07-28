@@ -303,7 +303,7 @@ canvas { display: block; background: transparent; }
 }
 .wip-col-job { display: table-cell; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; text-align: center; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
 .wip-col-item { display: table-cell; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
-.wip-col-line { display: table-cell; color: #a78bfa; font-size: 7px; white-space: nowrap; text-align: center; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
+.wip-col-line { display: table-cell; color: #fff; font-size: 7px; white-space: nowrap; text-align: center; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
 .wip-dwell { display: table-cell; font-weight: 600; white-space: nowrap; text-align: center; font-size: 9px; padding: 2px 4px; border-bottom: 1px solid rgba(30, 41, 59, 0.4); }
 .wip-dwell.warn { color: #f87171; }
 .wip-dwell.ok { color: #4ade80; }
@@ -1168,12 +1168,12 @@ function renderWIP(data) {
       const nowDate = new Date();
       const curMonth = nowDate.getFullYear() + '-' + String(nowDate.getMonth() + 1).padStart(2, '0');
       const isOtherMonth = j.ship_month && j.ship_month !== curMonth;
-      let rowStyle = isExc ? 'background:#7f1d1d;' : (isOtherMonth ? 'background:rgba(132, 204, 22, 0.15);' : '');
+      let rowStyle = '';
       if (isTransferred) rowStyle += 'opacity:0.85;';
       const dwellColor = isExc ? 'color:#fca5a5;' : (cls === 'warn' ? 'color:#f87171;' : cls === 'mid' ? 'color:#fbbf24;' : 'color:#4ade80;');
       const dwellText = isTransferred ? t('wip_transferred') : dwellStr;
       const excBtn = isExc ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + t('wip_exc_tag') + '</span>' : '';
-      const jobColor = isExc ? 'color:#fca5a5;' : (isOtherMonth ? 'color:#84cc16;' : '');
+      const jobColor = isExc ? 'color:#ef4444;' : (isOtherMonth ? 'color:#84cc16;' : '');
       rowsHtml += '<div class="wip-row" style="' + rowStyle + '"><span class="wip-col-job" style="' + jobColor + '">' + escHtml(j.job) + excBtn + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(j.line || '') + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
     });
 
