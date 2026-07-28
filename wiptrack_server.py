@@ -712,7 +712,7 @@ def api_excel_jobs():
         # 当月工单总数 = 所有 ship_date 在当月的 JOB（不管完成还是未完成）
 
         # 已完成：ship_date在当月 且 production_records中完成了Package工序
-        completed_jobs = all_month_jobs & pack_completed_this_month
+        completed_jobs = all_month_jobs & pack_completed_all
         # 未完成：ship_date在当月 且 未完成Package工序
         pending_jobs = all_month_jobs - completed_jobs
 
@@ -797,7 +797,7 @@ def api_excel_jobs():
         df_this_month_dedup = df_this_month.drop_duplicates(subset=['job'], keep='first')
         total_sales = float(df_this_month_dedup['sales_amount'].sum())
         # 用 pack_completed 判断，不再依赖 job_status
-        completed_mask = df_this_month_dedup['job'].str.strip().isin(pack_completed_this_month)
+        completed_mask = df_this_month_dedup['job'].str.strip().isin(pack_completed_all)
         pending_sales = float(df_this_month_dedup[~completed_mask]['sales_amount'].sum())
         completed_sales = float(df_this_month_dedup[completed_mask]['sales_amount'].sum())
 
@@ -820,7 +820,7 @@ def api_excel_jobs():
         conn_hours = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
         cursor_hours = conn_hours.cursor()
 
-        # 已完成工时：production_records 中完成 Package 且 ship_date 在当月
+        # 已完成工时：ship_date 在当月 且 已完成 Package（不限完成月份）
         cursor_hours.execute("""
             SELECT SUM(ps.qty * ps.cycle_time_h)
             FROM erp_data.hmlv_production_schedule ps
@@ -830,9 +830,8 @@ def api_excel_jobs():
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
                     AND pr.SiteRef = %s
-                    AND DATE_FORMAT(pr.CompleteDate, %s) = %s
               )
-        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef'], '%Y-%m', now_month))
+        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef']))
         completed_asm_hours = round(float(cursor_hours.fetchone()[0] or 0), 2)
         cursor_hours.execute("""
             SELECT COUNT(DISTINCT ps.job)
@@ -843,9 +842,8 @@ def api_excel_jobs():
                   SELECT DISTINCT pr.Job FROM production_records pr
                   WHERE pr.Station = '包装 Package'
                     AND pr.SiteRef = %s
-                    AND DATE_FORMAT(pr.CompleteDate, %s) = %s
               )
-        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef'], '%Y-%m', now_month))
+        """, (cfg['site_ref'], '%Y-%m', now_month, cfg['SiteRef']))
         completed_asm_count = cursor_hours.fetchone()[0] or 0
 
         # 未完成工时：ship_date在当月 且 未完成 Package
