@@ -1009,9 +1009,10 @@ def api_wip():
             if complete_date:
                 job_station_time[job][station_en] = complete_date
 
-        # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Item/Line 映射
+        # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Item/Line/ShipMonth 映射
         job_item_map = {}
         job_line_map = {}
+        job_ship_month_map = {}
         try:
             import pandas as pd
             df_erp = get_erp_schedule(cfg)
@@ -1025,7 +1026,10 @@ def api_wip():
                 line = str(row['line']).strip() if pd.notna(row['line']) else ''
                 if line and line != 'nan':
                     job_line_map[j] = line
-            print(f"[DEBUG] job_item_map loaded {len(job_item_map)} rows, job_line_map loaded {len(job_line_map)} rows")
+                ship_month = str(row['_month']).strip() if pd.notna(row['_month']) else ''
+                if ship_month and ship_month != 'nan':
+                    job_ship_month_map[j] = ship_month
+            print(f"[DEBUG] job_item_map loaded {len(job_item_map)} rows, job_line_map loaded {len(job_line_map)} rows, job_ship_month_map loaded {len(job_ship_month_map)} rows")
         except Exception as e:
             print(f"[WARN] ERP data load failed: {e}")
 
@@ -1090,6 +1094,7 @@ def api_wip():
                         'job': job,
                         'item': job_item_map.get(job, ''),
                         'line': job_line_map.get(job, ''),
+                        'ship_month': job_ship_month_map.get(job, ''),
                         'complete_time': prev_t.strftime('%Y-%m-%d %H:%M'),
                         'dwell_hours': dwell_hours,
                     }
