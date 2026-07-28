@@ -1032,13 +1032,13 @@ function renderStationTable(stats) {
     const color = STATION_COLORS[st] || '#94a3b8';
 
     // ===== 工单进度：已完成工单 / 目标工单数量 =====
-    const pct = targetJobs > 0 ? Math.round((all / targetJobs) * 100) : 0;
+    const pct = targetJobs > 0 ? (all / targetJobs) * 100 : 0;
 
     // ===== 工时计算 =====
     const todayHours = stationHoursToday[st] || 0;
     const cumHours = stationHours[st] || 0;
     // 工时进度：累计完成工时 / 目标总工时
-    const hoursRate = targetHours > 0 ? Math.round((cumHours / targetHours) * 100) : 0;
+    const hoursRate = targetHours > 0 ? (cumHours / targetHours) * 100 : 0;
     // 进度条宽度
     const actualBarWidth = Math.min(hoursRate, 100);
     // 工时进度条颜色：与工时数值列一致
@@ -1046,7 +1046,7 @@ function renderStationTable(stats) {
 
     // ===== 销售完成率：已完成销售 / 目标销售 =====
     const salesVal = stationSales[st] || 0;
-    const stationSalesRate = targetSales > 0 ? Math.round((salesVal / targetSales) * 100) : 0;
+    const stationSalesRate = targetSales > 0 ? (salesVal / targetSales) * 100 : 0;
     const salesBarWidth = Math.min(stationSalesRate, 100);
 
     // ===== 工单进度条宽度 =====
@@ -1065,7 +1065,7 @@ function renderStationTable(stats) {
       '<td style="color:#a78bfa;font-weight:600;font-size:13px;">' + (stationSalesToday[st] > 0 ? '$' + stationSalesToday[st].toLocaleString('en-US', {minimumFractionDigits: 2}) : '-') + '</td>' +
       '<td style="color:#a78bfa;font-weight:600">' + (salesVal > 0 ? '$' + salesVal.toLocaleString('en-US', {minimumFractionDigits: 2}) : '-') + '</td>' +
       '<td style="display:flex;align-items:center;gap:4px;">' +
-        '<span style="font-size:12px;font-weight:600;color:' + salesBarColor + ';min-width:32px;text-align:right;">' + stationSalesRate + '%</span>' +
+        '<span style="font-size:12px;font-weight:600;color:' + salesBarColor + ';min-width:32px;text-align:right;">' + stationSalesRate.toFixed(1) + '%</span>' +
         '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + salesBarWidth + '%;background:' + salesBarColor + ';"></div>' +
           '' +
@@ -1075,7 +1075,7 @@ function renderStationTable(stats) {
       '<td style="font-weight:600;font-size:13px;">' + (stationJobsToday[st] || 0) + '</td>' +
       '<td><strong>' + all + '</strong></td>' +
       '<td style="display:flex;align-items:center;gap:4px;">' +
-        '<span style="font-size:12px;font-weight:600;color:' + jobsBarColor + ';min-width:32px;text-align:right;">' + pct + '%</span>' +
+        '<span style="font-size:12px;font-weight:600;color:' + jobsBarColor + ';min-width:32px;text-align:right;">' + pct.toFixed(1) + '%</span>' +
         '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + jobsBarWidth + '%;background:' + jobsBarColor + ';"></div>' +
           '' +
@@ -1085,7 +1085,7 @@ function renderStationTable(stats) {
       '<td style="color:#60a5fa;font-weight:600;font-size:13px;">' + todayHours.toFixed(1) + '</td>' +
       '<td style="color:#60a5fa;font-weight:600;font-size:13px;">' + cumHours.toFixed(1) + '</td>' +
       '<td style="display:flex;align-items:center;gap:4px;">' +
-        '<span style="font-size:12px;font-weight:600;color:' + hoursBarColor + ';min-width:32px;text-align:right;">' + hoursRate + '%</span>' +
+        '<span style="font-size:12px;font-weight:600;color:' + hoursBarColor + ';min-width:32px;text-align:right;">' + hoursRate.toFixed(1) + '%</span>' +
         '<div class="progress-bar-wrap" style="height:20px;position:relative;flex:1;overflow:visible;">' +
           '<div class="progress-bar" style="width:' + actualBarWidth + '%;background:' + hoursBarColor + ';"></div>' +
           '' +
