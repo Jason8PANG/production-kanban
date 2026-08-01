@@ -248,7 +248,7 @@ def get_erp_schedule(site_config=None):
     conn = pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset='utf8mb4', connect_timeout=10)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT job, item, qty, remain_qty, ship_date, line, work_hours_h,
+        SELECT job, item, qty, ship_date, line, work_hours_h,
                unit_price, sales_amount, job_status, tested_qty, wo_total,
                cycle_time_h
         FROM erp_data.hmlv_production_schedule
@@ -271,11 +271,10 @@ def get_erp_schedule(site_config=None):
     df = pd.DataFrame(data)
     if df.empty:
         # 空结果：创建带必要列的 DataFrame，避免后续 KeyError
-        df = pd.DataFrame(columns=['job', 'item', 'qty', 'remain_qty', 'ship_date', 'line',
+        df = pd.DataFrame(columns=['job', 'item', 'qty', 'ship_date', 'line',
                                    'work_hours_h', 'unit_price', 'sales_amount',
                                    'job_status', 'tested_qty', 'wo_total', 'cycle_time_h'])
         df['qty'] = pd.Series(dtype='int')
-        df['remain_qty'] = pd.Series(dtype='int')
         df['tested_qty'] = pd.Series(dtype='int')
         df['wo_total'] = pd.Series(dtype='int')
         df['sales_amount'] = pd.Series(dtype='float')
@@ -288,7 +287,6 @@ def get_erp_schedule(site_config=None):
         # 统一 job 列为大写，避免大小写不匹配
         df['job'] = df['job'].astype(str).str.strip().str.upper()
         df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0).astype(int)
-        df['remain_qty'] = pd.to_numeric(df['remain_qty'], errors='coerce').fillna(0).astype(int)
         df['tested_qty'] = pd.to_numeric(df['tested_qty'], errors='coerce').fillna(0).astype(int)
         df['wo_total'] = pd.to_numeric(df['wo_total'], errors='coerce').fillna(0).astype(int)
         df['sales_amount'] = pd.to_numeric(df['sales_amount'], errors='coerce').fillna(0)
@@ -665,21 +663,16 @@ def api_excel_jobs():
         # ========== 工单→Item/工单数/工时映射（从数据库erp_data表）==========
         job_item_released = {}
         job_hours_map = {}  # job -> qty * cycle_time_h（工单总工时）
-        job_remain_hours_map = {}  # job -> remain_qty * cycle_time_h（剩余数量×单根时间）
         for _, row in df_all.iterrows():
             j = str(row['job']).strip()
             item = str(row['item']).strip() if pd.notna(row['item']) else ''
             released = int(row['qty']) if pd.notna(row['qty']) else 0
-            remain = int(row['remain_qty']) if pd.notna(row['remain_qty']) else 0
             ct = float(row['cycle_time_h']) if pd.notna(row['cycle_time_h']) else 0.0
             # 总工时 = 工单数量 × 单根时间
             total_h = float(released) * ct
-            # 剩余工时 = 剩余数量 × 单根时间
-            remain_h = float(remain) * ct
             if j and j not in job_item_released:
                 job_item_released[j] = (item, released)
                 job_hours_map[j] = total_h
-                job_remain_hours_map[j] = remain_h
 
         # ========== 当前月份工单集合（用于各模块引用）==========
         df_this_month = df_all[df_all['_month'] == now_month]
@@ -746,7 +739,7 @@ def api_excel_jobs():
         result['station_jobs_cum'] = station_jobs_cum
 
         # ========== 每个工序指定日期完成的工时 ==========
-        # 逻辑：指定日期工序工时 = 该日期完成该工序的所有记录.remain_qty × cycle_time_h 的累加（不去重，每条记录独立计算）
+        # 逻辑：指定日期工序工时 = 该日期完成该工序的所有记录.qty × cycle_time_h 的累加（不去重，每条记录独立计算）
         station_hours_today = {}
         for st in STATION_LIST:
             hours = 0.0
@@ -759,7 +752,7 @@ def api_excel_jobs():
                 if station_en == st:
                     job = str(r.get(job_col, '') or '').strip()
                     if job:
-                        hours += job_remain_hours_map.get(job, 0)
+                        hours += job_hours_map.get(job, 0)
             station_hours_today[st] = round(hours, 2)
         result['station_hours_today'] = station_hours_today
 
