@@ -1045,6 +1045,21 @@ def api_wip():
             for er in exc_rows:
                 exc_job = str(er[1]).strip().upper()
                 exc_station = str(er[0]).strip()
+                # 将异常的 station 转为标准英文 key
+                exc_station_en = STATION_CN_TO_KEY.get(exc_station, '')
+                if not exc_station_en:
+                    import re
+                    m = re.search(r'([A-Za-z]+)', exc_station)
+                    if m:
+                        eng = m.group(1)
+                        eng_map = {'Print':'Print','Cut':'Cut','Pre':'Pre','Asm':'Asm',
+                                   'Test':'Test','Pack':'Pack','Cutting':'Cut','Assembly':'Asm',
+                                   'Pretreat':'Pre','Package':'Pack','Job':'Print'}
+                        exc_station_en = eng_map.get(eng, eng)
+                # ★ 工序完成即视为异常已关闭：该异常所属工序在 production_records 中已有完成记录时跳过
+                job_stations = job_station_time.get(exc_job, {})
+                if exc_station_en and exc_station_en in job_stations:
+                    continue
                 exc_desc = str(er[2]).strip() if er[2] else ''
                 exc_start = parse_complete_date(er[3])
                 if exc_job not in exc_by_job:
@@ -1154,6 +1169,26 @@ def api_search_wo():
         # 收集匹配到的工单号（去重）
         matched_jobs = list(set(str(r[0]).strip().upper() for r in rows))
 
+        # 预构建 job → 已完成工序集合（用于判断异常所属工序是否已完成）
+        job_completed_stations = {}
+        for row in rows:
+            j = str(row[0]).strip().upper()
+            station_raw = str(row[1]).strip()
+            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            if not station_en:
+                import re
+                m = re.search(r'([A-Za-z]+)', station_raw)
+                if m:
+                    eng = m.group(1)
+                    eng_map = {'Print':'Print','Cut':'Cut','Pre':'Pre','Asm':'Asm',
+                               'Test':'Test','Pack':'Pack','Cutting':'Cut','Assembly':'Asm',
+                               'Pretreat':'Pre','Package':'Pack','Job':'Print'}
+                    station_en = eng_map.get(eng, eng)
+            if station_en:
+                if j not in job_completed_stations:
+                    job_completed_stations[j] = set()
+                job_completed_stations[j].add(station_en)
+
         # 查询异常信息（活跃 + 已关闭都查，前端区分显示）
         exc_by_job = {}
         if matched_jobs:
@@ -1167,16 +1202,29 @@ def api_search_wo():
             for er in exc_rows:
                 exc_job = str(er[0]).strip().upper()
                 exc_station = str(er[1]).strip()
+                # 将异常的 station 转为标准英文 key
+                exc_station_en = STATION_CN_TO_KEY.get(exc_station, '')
+                if not exc_station_en:
+                    import re
+                    m = re.search(r'([A-Za-z]+)', exc_station)
+                    if m:
+                        eng = m.group(1)
+                        eng_map = {'Print':'Print','Cut':'Cut','Pre':'Pre','Asm':'Asm',
+                                   'Test':'Test','Pack':'Pack','Cutting':'Cut','Assembly':'Asm',
+                                   'Pretreat':'Pre','Package':'Pack','Job':'Print'}
+                        exc_station_en = eng_map.get(eng, eng)
                 exc_desc = str(er[2]).strip() if er[2] else ''
                 exc_start = parse_complete_date(er[3])
                 exc_end = parse_complete_date(er[4]) if er[4] else None
+                # ★ 工序完成即视为异常已关闭：该工序在 production_records 中有完成记录时 active=False
+                station_completed = exc_station_en and exc_station_en in job_completed_stations.get(exc_job, set())
                 if exc_job not in exc_by_job:
                     exc_by_job[exc_job] = []
                 exc_by_job[exc_job].append({
                     'station': exc_station,
                     'description': exc_desc,
                     'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else '',
-                    'active': exc_end is None  # True=活跃异常, False=已关闭
+                    'active': exc_end is None and not station_completed  # True=活跃, False=已关闭(含工序完成自动关闭)
                 })
 
         conn.close()
