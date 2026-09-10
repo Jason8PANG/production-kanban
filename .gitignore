@@ -11,6 +11,7 @@ debug_*.png
 diagnose_*.txt
 fix_*.py
 hello.py
+cleanup_*.py
 
 # API测试和数据导出临时文件
 _api_*.json
