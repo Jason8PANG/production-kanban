@@ -1254,8 +1254,17 @@ def api_search_wo():
             job = str(row[0]).strip().upper()
             station_raw = str(row[1]).strip()
             complete_dt = parse_complete_date(row[2])  # 使用全局函数解析（支持 AM/PM）
-            # 统一 station key
-            station_key = STATION_CN_TO_KEY.get(station_raw, station_raw)
+            # 统一 station key（大小写不敏感匹配：数据库中可能存 'Pretreat' 也可能存 'pretreat'）
+            station_key = STATION_CN_TO_KEY.get(station_raw)
+            if not station_key:
+                # 大小写不敏感回退
+                station_lower = station_raw.lower()
+                for k, v in STATION_CN_TO_KEY.items():
+                    if k.lower() == station_lower:
+                        station_key = v
+                        break
+            if not station_key:
+                station_key = station_raw  # 实在找不到就用原始值
             complete_str = ''
             if complete_dt:
                 # complete_dt 现在是 datetime 对象，可以安全调用 strftime
