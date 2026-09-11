@@ -67,6 +67,22 @@ STATION_CN_TO_KEY.update({
 })
 
 
+def normalize_station_key(raw, default=''):
+    """工序名 → 英文key（大小写不敏感）。
+    数据库 Station 列可能混存 '预处理 Pretreat' / '预处理 pretreat' 等大小写变体，
+    先精确查表，找不到再按 lower 遍历，最后回退 default。"""
+    if raw is None:
+        return default
+    s = str(raw).strip()
+    if s in STATION_CN_TO_KEY:
+        return STATION_CN_TO_KEY[s]
+    s_lower = s.lower()
+    for k, v in STATION_CN_TO_KEY.items():
+        if str(k).strip().lower() == s_lower:
+            return v
+    return default
+
+
 def parse_complete_date(val):
     """
     解析 CompleteDate，支持：
@@ -168,7 +184,7 @@ def compute_station_jobs_with_cascade(records, station_col, date_col, job_col, n
     month_done = {}  # job -> set of stations completed this month
     for r in records:
         station_raw = str(r.get(station_col, '') or '').strip()
-        station_en = STATION_CN_TO_KEY.get(station_raw, '')
+        station_en = normalize_station_key(station_raw, '')
         if station_en not in station_list:
             continue
         dv = str(r.get(date_col, '') or '').strip()
@@ -185,7 +201,7 @@ def compute_station_jobs_with_cascade(records, station_col, date_col, job_col, n
     all_done = {}  # job -> set of stations ever completed
     for r in records:
         station_raw = str(r.get(station_col, '') or '').strip()
-        station_en = STATION_CN_TO_KEY.get(station_raw, '')
+        station_en = normalize_station_key(station_raw, '')
         if station_en not in station_list:
             continue
         job = str(r.get(job_col, '') or '').strip()
@@ -412,7 +428,7 @@ def api_data():
             if job not in month_jobs_erp:
                 continue
             sv = str(r.get(station_col, '') or '').strip()
-            station_en = STATION_CN_TO_KEY.get(sv, '')
+            station_en = normalize_station_key(sv, '')
             if station_en in STATION_ORDER:
                 station_done_map[station_en].add(job)
 
@@ -458,7 +474,7 @@ def api_data():
             job = str(r.get(job_col, '') or '').strip().upper()
             all_prod_jobs.add(job)
             sv = str(r.get(station_col, '') or '').strip()
-            station_en = STATION_CN_TO_KEY.get(sv, '')
+            station_en = normalize_station_key(sv, '')
             if station_en in STATION_ORDER:
                 station_done_all[station_en].add(job)
                 dv = str(r.get(date_col, '') or '').strip()
@@ -649,7 +665,7 @@ def api_excel_jobs():
 
         for r in records:
             station_raw = str(r.get(station_col, '') or '').strip()
-            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            station_en = normalize_station_key(station_raw, '')
             job = str(r.get(job_col, '') or '').strip()
             if job and station_en in station_jobs:
                 station_jobs[station_en].add(job)
@@ -689,7 +705,7 @@ def api_excel_jobs():
             if job not in all_month_jobs:
                 continue
             sv = str(r.get(station_col, '') or '').strip()
-            station_en = STATION_CN_TO_KEY.get(sv, '')
+            station_en = normalize_station_key(sv, '')
             if station_en in STATION_LIST:
                 # 日期筛选：只计入 CompleteDate ≤ filter_date 的记录
                 dv = str(r.get(date_col, '') or '').strip()
@@ -748,7 +764,7 @@ def api_excel_jobs():
                 if not dv.startswith(filter_date_str):
                     continue
                 station_cn = str(r.get(station_col, '') or '').strip()
-                station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
+                station_en = normalize_station_key(station_cn, station_cn)
                 if station_en == st:
                     job = str(r.get(job_col, '') or '').strip()
                     if job:
@@ -765,7 +781,7 @@ def api_excel_jobs():
                 if not dv.startswith(filter_date_str):
                     continue
                 station_cn = str(r.get(station_col, '') or '').strip()
-                station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
+                station_en = normalize_station_key(station_cn, station_cn)
                 if station_en == st:
                     job = str(r.get(job_col, '') or '').strip().upper()
                     if job:
@@ -785,7 +801,7 @@ def api_excel_jobs():
                 if not dv.startswith(filter_date_str):
                     continue
                 station_cn = str(r.get(station_col, '') or '').strip()
-                station_en = STATION_CN_TO_KEY.get(station_cn, station_cn)
+                station_en = normalize_station_key(station_cn, station_cn)
                 if station_en == st:
                     job = str(r.get(job_col, '') or '').strip().upper()
                     if job:
@@ -991,7 +1007,7 @@ def api_wip():
             job = str(row[0]).strip().upper()
             station_raw = str(row[1]).strip()
             # 转为标准英文 key（先查映射表，找不到时尝试提取英文部分）
-            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            station_en = normalize_station_key(station_raw, '')
             if not station_en:
                 import re
                 m = re.search(r'([A-Za-z]+)', station_raw)
@@ -1046,7 +1062,7 @@ def api_wip():
                 exc_job = str(er[1]).strip().upper()
                 exc_station = str(er[0]).strip()
                 # 将异常的 station 转为标准英文 key
-                exc_station_en = STATION_CN_TO_KEY.get(exc_station, '')
+                exc_station_en = normalize_station_key(exc_station, '')
                 if not exc_station_en:
                     import re
                     m = re.search(r'([A-Za-z]+)', exc_station)
@@ -1174,7 +1190,7 @@ def api_search_wo():
         for row in rows:
             j = str(row[0]).strip().upper()
             station_raw = str(row[1]).strip()
-            station_en = STATION_CN_TO_KEY.get(station_raw, '')
+            station_en = normalize_station_key(station_raw, '')
             if not station_en:
                 import re
                 m = re.search(r'([A-Za-z]+)', station_raw)
@@ -1203,7 +1219,7 @@ def api_search_wo():
                 exc_job = str(er[0]).strip().upper()
                 exc_station = str(er[1]).strip()
                 # 将异常的 station 转为标准英文 key
-                exc_station_en = STATION_CN_TO_KEY.get(exc_station, '')
+                exc_station_en = normalize_station_key(exc_station, '')
                 if not exc_station_en:
                     import re
                     m = re.search(r'([A-Za-z]+)', exc_station)
@@ -1255,7 +1271,7 @@ def api_search_wo():
             station_raw = str(row[1]).strip()
             complete_dt = parse_complete_date(row[2])  # 使用全局函数解析（支持 AM/PM）
             # 统一 station key（大小写不敏感匹配：数据库中可能存 'Pretreat' 也可能存 'pretreat'）
-            station_key = STATION_CN_TO_KEY.get(station_raw)
+            station_key = normalize_station_key(station_raw, station_raw)
             if not station_key:
                 # 大小写不敏感回退
                 station_lower = station_raw.lower()
