@@ -575,9 +575,12 @@ const I18N = {
     date_filter_label:'日期筛选',
     wip_no_data:'暂无数据', wip_dwell:'滞留时间', wip_transferred:'已流转',
     wip_exc_tag:'异常', wip_exc_label:'异常',
+    wip_exc_stock_tag:'库存异常', wip_exc_stock_label:'库存异常',
+    wip_exc_stock_tip:'标注缺料，但库存数量 ≥ 缺料数量',
     wo_searching:'查询中...', wo_failed:'查询失败: ', wo_not_found:'未找到工单 ',
     wo_net_error:'网络错误: ', wo_completed:'已完工', wo_in_progress:'进行中',
     exc_none:'无', exc_title:'异常 ', exc_station:'工位', exc_desc:'描述', exc_time:'开始时间', exc_active:'活跃', exc_resolved:'已解决',
+    exc_materials:'物料', exc_need:'缺', exc_stock:'库存', exc_stock_alert:'缺料但库存足够',
     stations:{Print:'工单打印 Print',Cut:'剪线 Cut',Pre:'预处理 Pre',Asm:'组装 Asm',Test:'测试 Test',Pack:'包装 Pack'},
     r30:'30秒',r60:'1分钟',r300:'5分钟',r600:'10分钟',r0:'手动',
     load_failed:'加载失败: '
@@ -598,9 +601,12 @@ const I18N = {
     date_filter_label:'Date Filter',
     wip_no_data:'No Data', wip_dwell:'Dwell Time', wip_transferred:'Transferred',
     wip_exc_tag:'Exc', wip_exc_label:'Exc',
+    wip_exc_stock_tag:'Stock', wip_exc_stock_label:'Stock Alert',
+    wip_exc_stock_tip:'Marked shortage, but stock qty ≥ shortage qty',
     wo_searching:'Searching...', wo_failed:'Query Failed: ', wo_not_found:'WO Not Found: ',
     wo_net_error:'Network Error: ', wo_completed:'Completed', wo_in_progress:'In Progress',
     exc_none:'None', exc_title:'Exception ', exc_station:'Station', exc_desc:'Description', exc_time:'Start Time', exc_active:'Active', exc_resolved:'Resolved',
+    exc_materials:'Materials', exc_need:'Need ', exc_stock:'Stock', exc_stock_alert:'Shortage but stock sufficient',
     stations:{Print:'Print',Cut:'Cut',Pre:'Pre-treatment',Asm:'Assembly',Test:'Test',Pack:'Pack'},
     r30:'30s',r60:'1 min',r300:'5 min',r600:'10 min',r0:'Manual',
     load_failed:'Load Failed: '
@@ -1156,6 +1162,7 @@ function renderWIP(data) {
     });
     sortedJobs.forEach(j => {
       const isExc = j.exception && j.exception.length > 0;
+      const isStock = !!j.stock_alert;   // 缺料但 SLItemLoc 有库存 → 黄色
       // 存储异常数据，供点击事件查找
       if (isExc) window._excData[j.job] = j.exception;
       let cls = 'ok';
@@ -1168,12 +1175,30 @@ function renderWIP(data) {
       const nowDate = new Date();
       const curMonth = nowDate.getFullYear() + '-' + String(nowDate.getMonth() + 1).padStart(2, '0');
       const isCurrentMonth = j.ship_month && j.ship_month === curMonth;
-      let rowStyle = isExc ? 'background:#7f1d1d;' : '';
+      // 行底色：缺料有库存=黄色系，普通异常=红色系
+      let rowStyle = isStock ? 'background:#78350f;' : (isExc ? 'background:#7f1d1d;' : '');
       if (isTransferred) rowStyle += 'opacity:0.85;';
-      const dwellColor = isExc ? 'color:#fca5a5;' : (cls === 'warn' ? 'color:#f87171;' : cls === 'mid' ? 'color:#fbbf24;' : 'color:#4ade80;');
+      const dwellColor = isStock ? 'color:#fde047;' : (isExc ? 'color:#fca5a5;' : (cls === 'warn' ? 'color:#f87171;' : cls === 'mid' ? 'color:#fbbf24;' : 'color:#4ade80;'));
       const dwellText = isTransferred ? t('wip_transferred') : dwellStr;
-      const excBtn = isExc ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + t('wip_exc_tag') + '</span>' : '';
-      const jobColor = isExc ? 'color:#fca5a5;' : (isCurrentMonth ? 'color:#84cc16;' : 'color:#fff;');
+      // 库存明细（用于 tooltip）：物料 缺N → 库存M
+      let stockItems = [];
+      if (isStock) {
+        (j.exception || []).forEach(function(e){
+          if (e.stock_ok && e.stock_items) {
+            Object.keys(e.stock_items).forEach(function(k){
+              var need = (e.need_qty && e.need_qty[k] != null) ? e.need_qty[k] : '?';
+              stockItems.push(k + ' ' + t('exc_need') + need + ' → ' + t('exc_stock') + e.stock_items[k]);
+            });
+          }
+        });
+      }
+      const stockTitle = stockItems.length ? (t('wip_exc_stock_tip') + ' | ' + stockItems.join(', ')) : t('wip_exc_stock_tip');
+      const excBtn = isExc ? (
+        isStock
+          ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" title="' + escHtml(stockTitle) + '" style="background:#facc15;color:#0f172a;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;font-weight:700;">' + t('wip_exc_stock_tag') + '</span>'
+          : '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + t('wip_exc_tag') + '</span>'
+      ) : '';
+      const jobColor = isStock ? 'color:#fde047;' : (isExc ? 'color:#fca5a5;' : (isCurrentMonth ? 'color:#84cc16;' : 'color:#fff;'));
       rowsHtml += '<div class="wip-row" style="' + rowStyle + '"><span class="wip-col-job" style="' + jobColor + '">' + escHtml(j.job) + excBtn + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(j.line || '') + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
     });
 
@@ -1182,6 +1207,7 @@ function renderWIP(data) {
         <span>${STATION_CN[st] || st}</span>
         <span style="background:${color}30;color:${color};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">${count}</span>
         ${(stData.exception_count || 0) > 0 ? '<span style="background:#dc2626;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">' + t('wip_exc_label') + stData.exception_count + '</span>' : ''}
+        ${(stData.stock_alert_count || 0) > 0 ? '<span title="' + escHtml(t('wip_exc_stock_tip')) + '" style="background:#facc15;color:#0f172a;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">' + t('wip_exc_stock_label') + stData.stock_alert_count + '</span>' : ''}
       </div>
       <div class="wip-card-body">
         <div class="wip-table">
@@ -1237,9 +1263,12 @@ function searchWO() {
           window._excData[r.job] = r.exceptions;
           const activeCount = r.exceptions.filter(e => e.active).length;
           const totalCount = r.exceptions.length;
-          const excColor = activeCount > 0 ? '#dc2626' : '#f59e0b';
+          // 缺料但有库存 → 用黄色标识
+          const hasStockAlert = r.exceptions.some(e => e.active && e.stock_ok);
+          const excColor = hasStockAlert ? '#facc15' : (activeCount > 0 ? '#dc2626' : '#f59e0b');
           const excText = activeCount > 0 ? (activeCount < totalCount ? `异常 ${activeCount}/${totalCount}` : `异常 ${activeCount}`) : `已解决 ${totalCount}`;
-          excHtml = `<span class="exc-tag" data-job="${escHtml(r.job)}" style="background:${excColor}22;color:${excColor};padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;cursor:pointer;border:1px solid ${excColor}44;">⚠ ${excText}</span>`;
+          const tagTitle = hasStockAlert ? ' ' + t('wip_exc_stock_tip') : '';
+          excHtml = `<span class="exc-tag" data-job="${escHtml(r.job)}" title="${escHtml(tagTitle)}" style="background:${excColor}22;color:${excColor};padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;cursor:pointer;border:1px solid ${excColor}44;">⚠ ${excText}</span>`;
         }
         // item 显示
         const itemText = r.item ? `<span style="color:#94a3b8;font-size:11px;margin-left:8px;">Item: ${escHtml(r.item)}</span>` : '';
@@ -1323,20 +1352,52 @@ function showExcModal(job) {
   html += '<div style="color:#94a3b8;font-size:12px;margin-bottom:10px;">Item: ' + escHtml(itemText || t('exc_none')) + ' &nbsp;|&nbsp; Line: ' + escHtml(lineText || t('exc_none')) + '</div>';
   html += '</div>';
   excList.forEach(function(e, idx) {
-    var badgeBg = e.active ? '#dc2626' : '#f59e0b';
-    var badgeText = e.active ? t('exc_active') : t('exc_resolved');
-    html += '<div style="padding:10px;background:#7f1d1d22;border-radius:6px;margin-bottom:8px;border-left:3px solid ' + badgeBg + ';">';
+    var isStock = !!(e.stock_ok);
+    var badgeBg = isStock ? '#facc15' : (e.active ? '#dc2626' : '#f59e0b');
+    var badgeText = isStock ? t('exc_stock_alert') : (e.active ? t('exc_active') : t('exc_resolved'));
+    var cardBg = isStock ? '#78350f33' : '#7f1d1d22';
+    var titleColor = isStock ? '#fde047' : '#fca5a5';
+    var descColor = isStock ? '#fde047' : '#fca5a5';
+    var badgeFg = isStock ? '#0f172a' : badgeBg;
+    html += '<div style="padding:10px;background:' + cardBg + ';border-radius:6px;margin-bottom:8px;border-left:3px solid ' + badgeBg + ';">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
-    html += '<span style="color:#fca5a5;font-weight:600;">\u26a0 ' + t('exc_title') + (idx + 1) + '</span>';
-    html += '<span style="background:' + badgeBg + '22;color:' + badgeBg + ';padding:1px 8px;border-radius:8px;font-size:10px;border:1px solid ' + badgeBg + '44;">' + badgeText + '</span>';
+    html += '<span style="color:' + titleColor + ';font-weight:600;">\u26a0 ' + t('exc_title') + (idx + 1) + '</span>';
+    html += '<span style="background:' + badgeBg + '22;color:' + badgeFg + ';padding:1px 8px;border-radius:8px;font-size:10px;border:1px solid ' + badgeBg + '44;">' + badgeText + '</span>';
     html += '</div>';
     html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_station') + '</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
-    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_desc') + '</span><span style="color:#fca5a5;">' + escHtml(e.description) + '</span></div>';
+    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_desc') + '</span><span style="color:' + descColor + ';">' + escHtml(e.description) + '</span></div>';
     html += '<div><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_time') + '</span><span style="color:#e2e8f0;">' + escHtml(e.start_time) + '</span></div>';
+    // 缺料物料 + SLItemLoc 库存明细（需求数量 vs 库存数量）
+    if (e.materials && e.materials.length) {
+      var matHtml = e.materials.map(function(m){
+        var need = (e.need_qty && e.need_qty[m] != null) ? e.need_qty[m] : null;
+        var stock = (e.stock_items && e.stock_items[m] != null) ? e.stock_items[m] : null;
+        if (need != null && stock != null && stock >= need) {
+          // 库存足够却标缺料 → 黄色
+          return '<span style="color:#0f172a;background:#facc15;border-radius:3px;padding:0 4px;margin-right:4px;">' + escHtml(m) + ' ' + t('exc_need') + _fmtQty(need) + ' / ' + t('exc_stock') + _fmtQty(stock) + '</span>';
+        }
+        if (need != null && stock != null) {
+          // 有数量但库存不足 → 红色（真缺料）
+          return '<span style="color:#fca5a5;background:#7f1d1d;border-radius:3px;padding:0 4px;margin-right:4px;">' + escHtml(m) + ' ' + t('exc_need') + _fmtQty(need) + ' / ' + t('exc_stock') + _fmtQty(stock) + '</span>';
+        }
+        // 无缺料数量 → 不参与匹配，灰色
+        return '<span style="color:#94a3b8;background:#33415555;border-radius:3px;padding:0 4px;margin-right:4px;">' + escHtml(m) + '</span>';
+      }).join('');
+      html += '<div style="margin-top:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_materials') + '</span>' + matHtml + '</div>';
+    }
+    if (isStock) {
+      html += '<div style="margin-top:6px;color:#fde047;font-size:11px;">\u26a0 ' + t('wip_exc_stock_tip') + '</div>';
+    }
     html += '</div>';
   });
   body.innerHTML = html;
   document.getElementById('excModal').style.display = 'flex';
+}
+
+function _fmtQty(n) {
+  n = Number(n);
+  if (!isFinite(n)) return String(n);
+  return (Math.abs(n - Math.round(n)) < 1e-9) ? String(Math.round(n)) : n.toFixed(1);
 }
 
 function escHtml(s) {

@@ -5,6 +5,7 @@ WIPTrack 实时数据 API 服务器
 """
 
 import json
+import re
 import pymysql
 from datetime import datetime, date, timedelta
 from flask import Flask, jsonify, send_from_directory, request
@@ -19,6 +20,16 @@ MYSQL_PORT = int(os.environ.get('MYSQL_PORT', 33306))
 MYSQL_USER = os.environ.get('MYSQL_USER', 'powerbi')
 MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', '!Q1234567')
 MYSQL_DATABASE = os.environ.get('MYSQL_DATABASE', 'wiptrack')
+
+# --- csi_datawarehouse (MS SQL Server) 库存数据源 ---
+# 用于 WIP 缺料异常校验：异常标注"缺料/Shortage"时，到 dbo.SLItemLoc 核对物料是否实际有库存
+CSI_SQL_SERVER = os.environ.get('CSI_SQL_SERVER', r'SUZVPRINT01\CUSTOMSSYS')
+CSI_SQL_DATABASE = os.environ.get('CSI_SQL_DATABASE', 'csi_datawarehouse')
+CSI_SQL_USER = os.environ.get('CSI_SQL_USER', 'naipowerbiuser')
+CSI_SQL_PASSWORD = os.environ.get('CSI_SQL_PASSWORD', 'LT8QGjMn8XwAjp')
+CSI_SQL_DRIVER = os.environ.get('CSI_SQL_DRIVER', 'ODBC Driver 17 for SQL Server')
+# 判定"有库存"的最小数量（> 该值才标黄）；默认 0，即只要库存 > 0 就标黄
+CSI_STOCK_MIN_QTY = float(os.environ.get('CSI_STOCK_MIN_QTY', '0') or 0)
 
 # --- 站点配置 ---
 SITE_CONFIG = {
@@ -168,6 +179,264 @@ def count_workdays(start_date, end_date):
             count += 1
         current += timedelta(days=1)
     return count
+
+
+# ===================== WIP 缺料异常 × SLItemLoc 库存校验 =====================
+# 物料编码规则：1 个大写字母 + 4~7 位数字（如 A080875 / C030273 / M0065）
+_MATERIAL_CODE_RE = re.compile(r'(?<![A-Za-z0-9])([A-Z]\d{4,7})(?![A-Za-z0-9])')
+# 缺料关键词（中文 + 英文，含常见拼写变体；避免用裸 "short" 以免误判测试站电性能不良）
+_SHORTAGE_RE = re.compile(
+    r'缺料|缺线|缺线材|shortage|shoratage|short\s+of|out\s+of\s+stock|no\s+stock',
+    re.IGNORECASE
+)
+
+
+def _is_material_shortage(exception_type, description):
+    """判断异常是否为缺料类。exception_type=material_shortage 或描述含缺料关键词。"""
+    if str(exception_type or '').strip().lower() == 'material_shortage':
+        return True
+    return bool(_SHORTAGE_RE.search(description or ''))
+
+
+def _extract_material_codes(materials_json, description):
+    """提取异常涉及的物料编码列表。
+    优先用 wip_exceptions.materials（JSON 数组），为空时回退到描述文本正则提取。
+    materials 支持两种元素：
+      - 字符串: ["C030273", ...]
+      - 对象:   [{"item":"D000166","qty":79,"unit":"PCS"}, ...] → 取 item 字段"""
+    codes = []
+    if materials_json:
+        raw = materials_json
+        if isinstance(raw, (bytes, bytearray)):
+            try:
+                raw = raw.decode('utf-8', 'ignore')
+            except Exception:
+                raw = str(raw)
+        try:
+            val = json.loads(raw)
+            if isinstance(val, list):
+                for x in val:
+                    if isinstance(x, dict):
+                        # 对象元素：item/ITEM 字段是物料号
+                        code = x.get('item') or x.get('ITEM') or x.get('Item')
+                        if code:
+                            codes.append(str(code).strip().upper())
+                    elif str(x).strip():
+                        codes.append(str(x).strip().upper())
+            elif isinstance(val, str) and val.strip():
+                codes = [val.strip().upper()]
+        except Exception:
+            # materials 不是合法 JSON 时，也尝试直接正则提取
+            codes = [m.group(1).upper() for m in _MATERIAL_CODE_RE.finditer(str(raw))]
+    if not codes:
+        codes = [m.group(1).upper() for m in _MATERIAL_CODE_RE.finditer(description or '')]
+    # 去重且保持顺序
+    return list(dict.fromkeys(codes))
+
+
+def _parse_material_qty_map(materials_json):
+    """解析 materials JSON 中对象元素自带的数量，返回 {物料: 数量}。
+    如 [{"item":"D000166","qty":79,"unit":"PCS"}] → {'D000166': 79.0}
+    仅对象元素带 qty 时才有值；普通字符串数组返回 {}。"""
+    if not materials_json:
+        return {}
+    raw = materials_json
+    if isinstance(raw, (bytes, bytearray)):
+        try:
+            raw = raw.decode('utf-8', 'ignore')
+        except Exception:
+            raw = str(raw)
+    result = {}
+    try:
+        val = json.loads(raw)
+        if isinstance(val, list):
+            for x in val:
+                if isinstance(x, dict):
+                    code = x.get('item') or x.get('ITEM') or x.get('Item')
+                    qty = x.get('qty', x.get('QTY'))
+                    if code is not None and qty is not None:
+                        try:
+                            result[str(code).strip().upper()] = float(qty)
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    return result
+
+
+def get_material_stock(site_code, items, exclude_mrb=True, timeout=8):
+    """查询 csi_datawarehouse.dbo.SLItemLoc，返回 {物料编码: 可用库存数量}（仅含 >0）。
+    - site_code: '310' / '410'，对应 SLItemLoc.SiteRef（310 只查 310 库存，410 只查 410）
+    - 库存口径（2026-09-19 更新）：MrbFlag=0（排除报废/待判）
+      + PermFlag=0（排除永久库位）+ Loc NOT LIKE '%floor%'（排除 floor 线边仓）
+    查询失败（网络/驱动/权限等）时返回空 dict，不影响主流程。"""
+    items = [str(i).strip().upper() for i in items if str(i).strip()]
+    if not items:
+        return {}
+    try:
+        import pyodbc
+        conn_str = (
+            f"DRIVER={{{CSI_SQL_DRIVER}}};SERVER={CSI_SQL_SERVER};DATABASE={CSI_SQL_DATABASE};"
+            f"UID={CSI_SQL_USER};PWD={CSI_SQL_PASSWORD};TrustServerCertificate=yes;Encrypt=no;"
+            f"Connection Timeout={timeout}"
+        )
+        conn = pyodbc.connect(conn_str, timeout=timeout)
+        cur = conn.cursor()
+        result = {}
+        for i in range(0, len(items), 500):
+            chunk = items[i:i + 500]
+            placeholders = ','.join(['?'] * len(chunk))
+            sql = (
+                f"SELECT Item, SUM(QtyOnHand) AS qty FROM dbo.SLItemLoc "
+                f"WHERE SiteRef = ? AND Item IN ({placeholders})"
+                + (" AND MrbFlag = 0" if exclude_mrb else "")
+                + " AND PermFlag = 0 AND Loc NOT LIKE '%floor%'"
+                + " GROUP BY Item"
+            )
+            cur.execute(sql, [str(site_code)] + chunk)
+            for it, qty in cur.fetchall():
+                try:
+                    q = float(qty) if qty is not None else 0.0
+                except Exception:
+                    q = 0.0
+                if q > CSI_STOCK_MIN_QTY:
+                    result[str(it).strip().upper()] = q
+        conn.close()
+        return result
+    except Exception as e:
+        print(f"[WARN] SLItemLoc stock query failed (site={site_code}): {e}")
+        return {}
+
+
+# 缺料数量：数字 + 单位（PCS/FT/根/条/个 等；必须带单位，纯数字不算，避免误抓"只能产出3"之类）
+_QTY_UNIT_RE = re.compile(r'(\d+(?:\.\d+)?)\s*(?:pcs?|ft|feet|meters?|mtrs?|米|根|条|个|set|sets?|kg)(?![A-Za-z0-9])', re.IGNORECASE)
+# 中文数字 + 单位（如 "还有三根缺料D080053"）
+_CN_NUM_MAP = {'一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9}
+_CN_QTY_RE = re.compile(r'([一二两三四五六七八九十]+)\s*(?:根|条|个|pcs?|条|米)')
+
+
+def _parse_qty_number(text):
+    """从文本中解析第一个 '数量+单位'（如 2PCS / 13.4FT / 三根），返回 float；无则 None。"""
+    m = _QTY_UNIT_RE.search(text or '')
+    if m:
+        try:
+            return float(m.group(1))
+        except Exception:
+            return None
+    m = _CN_QTY_RE.search(text or '')
+    if m:
+        cn = m.group(1)
+        if '十' in cn:
+            left, _, right = cn.partition('十')
+            left_v = _CN_NUM_MAP.get(left, 1) if left else 1
+            right_v = _CN_NUM_MAP.get(right, 0) if right else 0
+            return float(left_v * 10 + right_v)
+        val = 0
+        for ch in cn:
+            val = val * 10 + _CN_NUM_MAP.get(ch, 0)
+        return float(val) if val else None
+    return None
+
+
+def _find_qty_in(text, take_last=False):
+    """在文本中按位置找数量（数字+单位 或 中文数字+单位），返回 float；无则 None。
+    take_last=True 时取位置最靠后的一个（即最靠近物料号/最靠近末尾的）。"""
+    text = text or ''
+    cands = []
+    for m in _QTY_UNIT_RE.finditer(text):
+        cands.append((m.start(), m.group(1), False))
+    for m in _CN_QTY_RE.finditer(text):
+        cands.append((m.start(), m.group(0), True))
+    if not cands:
+        return None
+    cands.sort(key=lambda x: x[0])
+    pick = cands[-1] if take_last else cands[0]
+    if pick[2]:
+        return _parse_qty_number(pick[1])
+    try:
+        return float(pick[1])
+    except Exception:
+        return None
+
+
+def _extract_material_quantities(material_codes, description):
+    """解析每个物料的缺料数量，返回 {物料: 数量}。
+    解析顺序（对每个物料）：
+      1) 物料号后 25 字符内的 数量+单位，取最靠前的（如 'D041134 (75PCS)'、'C030273 - 2PCS'）
+      2) 物料号前 18 字符内的 数量+单位，取最靠后的（最靠近物料号，如 '还有2PCS缺料H000198'）
+      3) 兜底：整个描述里位置最靠后的 数量+单位
+    完全解析不到数量时返回 {}——按规则该异常不参与库存匹配。"""
+    desc = str(description or '')
+    if not desc:
+        return {}
+    upper = desc.upper()
+    result = {}
+    for code in material_codes:
+        pos = upper.find(code)
+        if pos >= 0:
+            after = desc[pos + len(code): pos + len(code) + 25]
+            q = _find_qty_in(after, take_last=False)
+            if q is not None:
+                result[code] = q
+                continue
+            before = desc[max(0, pos - 18): pos]
+            q = _find_qty_in(before, take_last=True)
+            if q is not None:
+                result[code] = q
+    if not result:
+        # 兜底：整个描述里位置最靠后的数量，平摊给所有物料
+        q = _find_qty_in(desc, take_last=True)
+        if q is not None:
+            result = {c: q for c in material_codes}
+    return result
+
+
+def annotate_exceptions_with_stock(exc_by_job, site_code):
+    """给缺料异常补充库存信息（2026-09-19 按数量匹配版）：
+    - 仅当异常能解析出缺料数量（materials JSON 自带 qty 或描述文本解析）时才参与匹配；无数量的缺料异常直接忽略
+    - 黄色条件：该站点(SiteRef)可用库存 QtyOnHand >= 缺料数量（每个有数量的物料都要满足）
+    - 每个异常条目增加 need_qty({物料: 缺料数量}) / stock_items({物料: 库存}) / stock_ok(bool)
+    - 返回 stock_alert_jobs: set(job)，即"库存足够却标缺料"的工单集合"""
+    # 1) 解析每条缺料异常的数量（materials JSON 的 qty 优先，描述文本解析兜底）
+    for lst in exc_by_job.values():
+        for e in lst:
+            e['need_qty'] = {}
+            if e.get('shortage') and e.get('materials'):
+                json_qty = e.get('materials_qty') or {}
+                if json_qty:
+                    e['need_qty'] = dict(json_qty)
+                else:
+                    e['need_qty'] = _extract_material_quantities(e['materials'], e.get('description', ''))
+    all_codes = set()
+    for lst in exc_by_job.values():
+        for e in lst:
+            if e['need_qty']:
+                all_codes.update(e['need_qty'].keys())
+
+    # 2) 只查有数量的物料库存（310 只查 310 的库存，410 只查 410）
+    stock_map = get_material_stock(site_code, all_codes) if all_codes else {}
+
+    # 3) 逐条比对：库存 >= 缺料数量 → 黄色
+    stock_alert_jobs = set()
+    for job, lst in exc_by_job.items():
+        for e in lst:
+            need = e.get('need_qty') or {}
+            if not need:
+                e['stock_items'] = {}
+                e['stock_ok'] = False
+                continue
+            hits = {}
+            ok = True
+            for code, qty in need.items():
+                stock = stock_map.get(code, 0.0)
+                hits[code] = stock
+                if stock < qty:
+                    ok = False
+            e['stock_items'] = hits
+            e['stock_ok'] = ok
+            if ok:
+                stock_alert_jobs.add(job)
+    return stock_alert_jobs
 
 
 def compute_station_jobs_with_cascade(records, station_col, date_col, job_col, now_month, station_list=None):
@@ -1053,7 +1322,7 @@ def api_wip():
         exc_by_job = {}
         try:
             cursor.execute(
-                "SELECT Station, Job, description, start_time FROM wip_exceptions "
+                "SELECT Station, Job, description, start_time, exception_type, materials FROM wip_exceptions "
                 "WHERE SiteRef = %s AND end_time IS NULL",
                 (cfg['SiteRef'],)
             )
@@ -1064,7 +1333,6 @@ def api_wip():
                 # 将异常的 station 转为标准英文 key
                 exc_station_en = normalize_station_key(exc_station, '')
                 if not exc_station_en:
-                    import re
                     m = re.search(r'([A-Za-z]+)', exc_station)
                     if m:
                         eng = m.group(1)
@@ -1077,19 +1345,34 @@ def api_wip():
                 if exc_station_en and exc_station_en in job_stations:
                     continue
                 exc_desc = str(er[2]).strip() if er[2] else ''
+                exc_type = str(er[4]).strip().lower() if er[4] else ''
                 exc_start = parse_complete_date(er[3])
+                is_short = _is_material_shortage(exc_type, exc_desc)
                 if exc_job not in exc_by_job:
                     exc_by_job[exc_job] = []
                 exc_by_job[exc_job].append({
                     'station': exc_station,
                     'description': exc_desc,
-                    'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else ''
+                    'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else '',
+                    'type': exc_type,
+                    'shortage': is_short,
+                    'materials': _extract_material_codes(er[5], exc_desc) if is_short else [],
+                    'materials_qty': _parse_material_qty_map(er[5]) if is_short else {},
                 })
         except Exception as e:
             print(f"[WARN] exception query failed: {e}")
             exc_by_job = {}
-        
+
         conn.close()
+
+        # ★ 缺料异常 × SLItemLoc 库存校验：标注"缺料"但 ERP 实际有库存的 → 黄色告警
+        stock_alert_jobs = set()
+        try:
+            stock_alert_jobs = annotate_exceptions_with_stock(exc_by_job, str(cfg['site_ref']))
+            if stock_alert_jobs:
+                print(f"[INFO] site={cfg['site_ref']} 缺料但有库存的工单 {len(stock_alert_jobs)} 个")
+        except Exception as e:
+            print(f"[WARN] stock annotation failed: {e}")
 
         now = datetime.now()
 
@@ -1131,17 +1414,22 @@ def api_wip():
                     }
                     if job in exc_by_job:
                         wip_entry['exception'] = exc_by_job[job]
+                        # ★ 缺料但有库存 → 前端黄色告警
+                        if job in stock_alert_jobs:
+                            wip_entry['stock_alert'] = True
                     wip_list.append(wip_entry)
 
             # 按滞留时间降序，异常工单置顶
             exc_count = sum(1 for e in wip_list if 'exception' in e)
+            stock_alert_count = sum(1 for e in wip_list if e.get('stock_alert'))
             wip_list.sort(key=lambda x: (-(1 if 'exception' in x else 0), -x['dwell_hours']))
 
             result[station_en] = {
                 'label': station_cn,
                 'count': len(wip_list),  # 滞留数
                 'done_in_month': done_in_month,      # 全部完成数
-                'exception_count': exc_count,         # 异常工单数（新增）
+                'exception_count': exc_count,         # 异常工单数
+                'stock_alert_count': stock_alert_count,  # 缺料但有库存的工单数（黄色）
                 'jobs': wip_list
             }
 
@@ -1210,7 +1498,7 @@ def api_search_wo():
         if matched_jobs:
             placeholders = ','.join(['%s'] * len(matched_jobs))
             cursor.execute(
-                f"SELECT Job, Station, description, start_time, end_time FROM wip_exceptions "
+                f"SELECT Job, Station, description, start_time, end_time, exception_type, materials FROM wip_exceptions "
                 f"WHERE SiteRef = %s AND UPPER(Job) IN ({placeholders}) ORDER BY start_time DESC",
                 (cfg['SiteRef'],) + tuple(matched_jobs)
             )
@@ -1221,7 +1509,6 @@ def api_search_wo():
                 # 将异常的 station 转为标准英文 key
                 exc_station_en = normalize_station_key(exc_station, '')
                 if not exc_station_en:
-                    import re
                     m = re.search(r'([A-Za-z]+)', exc_station)
                     if m:
                         eng = m.group(1)
@@ -1232,6 +1519,8 @@ def api_search_wo():
                 exc_desc = str(er[2]).strip() if er[2] else ''
                 exc_start = parse_complete_date(er[3])
                 exc_end = parse_complete_date(er[4]) if er[4] else None
+                exc_type = str(er[5]).strip().lower() if er[5] else ''
+                is_short = _is_material_shortage(exc_type, exc_desc)
                 # ★ 工序完成即视为异常已关闭：该工序在 production_records 中有完成记录时 active=False
                 station_completed = exc_station_en and exc_station_en in job_completed_stations.get(exc_job, set())
                 if exc_job not in exc_by_job:
@@ -1240,10 +1529,20 @@ def api_search_wo():
                     'station': exc_station,
                     'description': exc_desc,
                     'start_time': exc_start.strftime('%m-%d %H:%M') if exc_start else '',
-                    'active': exc_end is None and not station_completed  # True=活跃, False=已关闭(含工序完成自动关闭)
+                    'active': exc_end is None and not station_completed,  # True=活跃, False=已关闭(含工序完成自动关闭)
+                    'type': exc_type,
+                    'shortage': is_short,
+                    'materials': _extract_material_codes(er[6], exc_desc) if is_short else [],
+                    'materials_qty': _parse_material_qty_map(er[6]) if is_short else {},
                 })
 
         conn.close()
+
+        # ★ 缺料异常 × SLItemLoc 库存校验（与 /api/wip 一致）
+        try:
+            annotate_exceptions_with_stock(exc_by_job, str(cfg['site_ref']))
+        except Exception as e:
+            print(f"[WARN] search_wo stock annotation failed: {e}")
 
         # 从数据库 erp_data.hmlv_production_schedule 读取 Job→Line/Item 映射
         job_line_map = {}

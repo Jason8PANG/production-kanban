@@ -3,3 +3,4 @@ flask-cors
 pymysql
 pandas
 cryptography>=42.0.0
+pyodbc
