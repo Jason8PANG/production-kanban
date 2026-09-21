@@ -1848,10 +1848,18 @@ def api_hours_daily():
 @app.route('/')
 def index():
     base_dir = os.path.dirname(os.path.abspath(__file__))
+    html_path = os.path.join(base_dir, 'HMLV生产看板.html')
     resp = send_from_directory(base_dir, 'HMLV生产看板.html')
-    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    # 强制不缓存，避免浏览器沿用旧页面
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
+    # 页面版本标识：HTML 文件修改时间戳，便于确认是否加载到最新版
+    try:
+        ver = str(int(os.path.getmtime(html_path)))
+    except Exception:
+        ver = '0'
+    resp.headers['X-Kanban-Version'] = ver
     return resp
 
 

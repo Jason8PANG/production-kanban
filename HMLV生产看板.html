@@ -387,6 +387,8 @@ canvas { display: block; background: transparent; }
       <span data-i18n="current_time_label">当前时间:</span> <span id="updated_at">--:--:--</span>
       &nbsp;|&nbsp;
       <span data-i18n="total_prefix">共 </span><span id="total_records">--</span><span data-i18n="total_suffix"> 条</span>
+      &nbsp;|&nbsp;
+      <span id="pageVer" style="color:#64748b;" title="页面版本（HTML 修改时间）">v --</span>
     </div>
     <select id="intervalSelect">
       <option value="30" data-i18n="r30">30秒</option>
@@ -574,9 +576,10 @@ const I18N = {
     th_today_hours:'今日完成工时', th_cum_hours:'累计完成工时', th_hours_progress:'工时进度',
     date_filter_label:'日期筛选',
     wip_no_data:'暂无数据', wip_dwell:'滞留时间', wip_transferred:'已流转',
-    wip_exc_tag:'异常', wip_exc_label:'异常',
-    wip_exc_stock_tag:'库存异常', wip_exc_stock_label:'库存异常',
+    wip_exc_label:'异常',
     wip_exc_stock_tip:'标注缺料，但库存数量 ≥ 缺料数量',
+    exc_type_material_shortage:'缺料', exc_type_quality_issue:'质量', exc_type_others:'其他',
+    exc_type_missing_va:'缺VA', exc_type_unknown:'未分类', exc_type_label:'类别',
     wo_searching:'查询中...', wo_failed:'查询失败: ', wo_not_found:'未找到工单 ',
     wo_net_error:'网络错误: ', wo_completed:'已完工', wo_in_progress:'进行中',
     exc_none:'无', exc_title:'异常 ', exc_station:'工位', exc_desc:'描述', exc_time:'开始时间', exc_active:'活跃', exc_resolved:'已解决',
@@ -600,9 +603,10 @@ const I18N = {
     th_today_hours:'Today Hrs', th_cum_hours:'Cum. Hrs', th_hours_progress:'Hrs %',
     date_filter_label:'Date Filter',
     wip_no_data:'No Data', wip_dwell:'Dwell Time', wip_transferred:'Transferred',
-    wip_exc_tag:'Exc', wip_exc_label:'Exc',
-    wip_exc_stock_tag:'Stock', wip_exc_stock_label:'Stock Alert',
+    wip_exc_label:'Exc',
     wip_exc_stock_tip:'Marked shortage, but stock qty ≥ shortage qty',
+    exc_type_material_shortage:'Shortage', exc_type_quality_issue:'Quality', exc_type_others:'Others',
+    exc_type_missing_va:'Missing VA', exc_type_unknown:'Unclassified', exc_type_label:'Type',
     wo_searching:'Searching...', wo_failed:'Query Failed: ', wo_not_found:'WO Not Found: ',
     wo_net_error:'Network Error: ', wo_completed:'Completed', wo_in_progress:'In Progress',
     exc_none:'None', exc_title:'Exception ', exc_station:'Station', exc_desc:'Description', exc_time:'Start Time', exc_active:'Active', exc_resolved:'Resolved',
@@ -613,6 +617,40 @@ const I18N = {
   }
 };
 function t(k){ return (I18N[currentSite]||I18N['310'])[k] || k; }
+
+// 异常类别 → 显示文案 + 配色
+// 所有异常类别统一用红色（不再按类别区分颜色）；缺料且有库存仍由调用方改用黄色"库存异常"
+var EXC_TYPE_COLOR = '#dc2626';
+var EXC_TYPE_META = {
+  material_shortage: { i18n:'exc_type_material_shortage', color: EXC_TYPE_COLOR },
+  quality_issue:     { i18n:'exc_type_quality_issue',     color: EXC_TYPE_COLOR },
+  others:            { i18n:'exc_type_others',            color: EXC_TYPE_COLOR },
+  missing_va:        { i18n:'exc_type_missing_va',         color: EXC_TYPE_COLOR },
+  '':                { i18n:'exc_type_unknown',           color: EXC_TYPE_COLOR }
+};
+// 取异常类别的显示文案（英文 key 统一小写归一）
+function excTypeLabel(rawType){
+  var k = String(rawType == null ? '' : rawType).trim().toLowerCase();
+  var meta = EXC_TYPE_META[k] || EXC_TYPE_META[''];
+  return t(meta.i18n);
+}
+// 取异常类别的基础配色
+function excTypeColor(rawType){
+  var k = String(rawType == null ? '' : rawType).trim().toLowerCase();
+  var meta = EXC_TYPE_META[k] || EXC_TYPE_META[''];
+  return meta.color;
+}
+// 把一组异常按类别去重，返回 [{type, label, color, count}]（保留首次出现顺序）
+function excTypeSummary(excList){
+  var seen = {}, out = [];
+  (excList || []).forEach(function(e){
+    var k = String((e && e.type) == null ? '' : e.type).trim().toLowerCase();
+    if (seen[k]) { seen[k].count++; return; }
+    seen[k] = { type:k, label:excTypeLabel(k), color:excTypeColor(k), count:1 };
+    out.push(seen[k]);
+  });
+  return out;
+}
 function applyI18N(){
   document.querySelectorAll('[data-i18n]').forEach(el=>{
     const v=t(el.getAttribute('data-i18n'));
@@ -1193,11 +1231,21 @@ function renderWIP(data) {
         });
       }
       const stockTitle = stockItems.length ? (t('wip_exc_stock_tip') + ' | ' + stockItems.join(', ')) : t('wip_exc_stock_tip');
-      const excBtn = isExc ? (
-        isStock
-          ? '<span class="exc-tag" data-job="' + escHtml(j.job) + '" title="' + escHtml(stockTitle) + '" style="background:#facc15;color:#0f172a;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;font-weight:700;">' + t('wip_exc_stock_tag') + '</span>'
-          : '<span class="exc-tag" data-job="' + escHtml(j.job) + '" style="background:#dc2626;color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;">' + t('wip_exc_tag') + '</span>'
-      ) : '';
+      // ★ 异常标签：显示具体异常类别（缺料/质量/其他/缺VA）；缺料但有库存 → 文字为「缺料」，背景变黄
+      let excBtn = '';
+      if (isExc) {
+        if (isStock) {
+          const shortN = (j.exception || []).filter(function(e){ return e.shortage; }).length;
+          const stockTxt = t('exc_type_material_shortage') + (shortN > 1 ? shortN : '');
+          excBtn = '<span class="exc-tag" data-job="' + escHtml(j.job) + '" title="' + escHtml(stockTitle) + '" style="background:#facc15;color:#0f172a;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;font-weight:700;">' + escHtml(stockTxt) + '</span>';
+        } else {
+          // 按类别去重渲染，多类别时附数量，如 "质量2"
+          excTypeSummary(j.exception).forEach(function(ts){
+            const txt = ts.count > 1 ? (ts.label + ts.count) : ts.label;
+            excBtn += '<span class="exc-tag" data-job="' + escHtml(j.job) + '" title="' + escHtml(t('exc_type_label') + ': ' + ts.label + (ts.count > 1 ? ' ×' + ts.count : '')) + '" style="background:' + ts.color + ';color:#fff;padding:1px 5px;border-radius:3px;font-size:7px;margin-left:3px;cursor:pointer;white-space:nowrap;font-weight:700;">' + escHtml(txt) + '</span>';
+          });
+        }
+      }
       const jobColor = isStock ? 'color:#fde047;' : (isExc ? 'color:#fca5a5;' : (isCurrentMonth ? 'color:#84cc16;' : 'color:#fff;'));
       rowsHtml += '<div class="wip-row" style="' + rowStyle + '"><span class="wip-col-job" style="' + jobColor + '">' + escHtml(j.job) + excBtn + '</span><span class="wip-col-item">' + escHtml(itemText) + '</span><span class="wip-col-line">' + escHtml(j.line || '') + '</span><span class="wip-dwell" style="' + dwellColor + '">' + dwellText + '</span></div>';
     });
@@ -1207,7 +1255,6 @@ function renderWIP(data) {
         <span>${STATION_CN[st] || st}</span>
         <span style="background:${color}30;color:${color};border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;">${count}</span>
         ${(stData.exception_count || 0) > 0 ? '<span style="background:#dc2626;color:#fff;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">' + t('wip_exc_label') + stData.exception_count + '</span>' : ''}
-        ${(stData.stock_alert_count || 0) > 0 ? '<span title="' + escHtml(t('wip_exc_stock_tip')) + '" style="background:#facc15;color:#0f172a;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:4px;">' + t('wip_exc_stock_label') + stData.stock_alert_count + '</span>' : ''}
       </div>
       <div class="wip-card-body">
         <div class="wip-table">
@@ -1269,6 +1316,11 @@ function searchWO() {
           const excText = activeCount > 0 ? (activeCount < totalCount ? `异常 ${activeCount}/${totalCount}` : `异常 ${activeCount}`) : `已解决 ${totalCount}`;
           const tagTitle = hasStockAlert ? ' ' + t('wip_exc_stock_tip') : '';
           excHtml = `<span class="exc-tag" data-job="${escHtml(r.job)}" title="${escHtml(tagTitle)}" style="background:${excColor}22;color:${excColor};padding:2px 8px;border-radius:10px;font-size:11px;margin-left:8px;cursor:pointer;border:1px solid ${excColor}44;">⚠ ${excText}</span>`;
+          // ★ 追加异常类别小标签（活跃异常才显示类别，去重）
+          excTypeSummary(r.exceptions.filter(e => e.active)).forEach(ts => {
+            const txt = ts.count > 1 ? (ts.label + '×' + ts.count) : ts.label;
+            excHtml += `<span style="background:${ts.color};color:#fff;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;margin-left:4px;">${escHtml(txt)}</span>`;
+          });
         }
         // item 显示
         const itemText = r.item ? `<span style="color:#94a3b8;font-size:11px;margin-left:8px;">Item: ${escHtml(r.item)}</span>` : '';
@@ -1365,6 +1417,9 @@ function showExcModal(job) {
     html += '<span style="background:' + badgeBg + '22;color:' + badgeFg + ';padding:1px 8px;border-radius:8px;font-size:10px;border:1px solid ' + badgeBg + '44;">' + badgeText + '</span>';
     html += '</div>';
     html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_station') + '</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
+    // ★ 异常类别
+    var eTypeColor = excTypeColor(e.type);
+    html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_type_label') + '</span><span style="background:' + eTypeColor + ';color:#fff;padding:1px 7px;border-radius:8px;font-size:10px;font-weight:700;">' + escHtml(excTypeLabel(e.type)) + '</span></div>';
     html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_desc') + '</span><span style="color:' + descColor + ';">' + escHtml(e.description) + '</span></div>';
     html += '<div><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_time') + '</span><span style="color:#e2e8f0;">' + escHtml(e.start_time) + '</span></div>';
     // 缺料物料 + SLItemLoc 库存明细（需求数量 vs 库存数量）
@@ -1415,6 +1470,22 @@ function updateClock() {
 }
 setInterval(updateClock, 1000);
 updateClock();
+
+// 显示页面版本（读取服务端 X-Kanban-Version 响应头，便于确认是否加载到最新版）
+(function showPageVersion(){
+  var el = document.getElementById('pageVer');
+  if (!el) return;
+  fetch(location.pathname + '?_v=' + Date.now(), {method:'HEAD', cache:'no-store'})
+    .then(function(r){
+      var v = r.headers.get('X-Kanban-Version');
+      if (v && v !== '0') {
+        var d = new Date(Number(v) * 1000);
+        var pad = function(n){ return String(n).padStart(2,'0'); };
+        el.textContent = 'v ' + (d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      }
+    })
+    .catch(function(){});
+})();
 
 // 根据 URL 参数或默认值初始化站点选择器和标题
 const siteSelect = document.getElementById('siteSelect');
