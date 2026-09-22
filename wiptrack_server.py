@@ -267,8 +267,13 @@ def _parse_material_qty_map(materials_json):
 def get_material_stock(site_code, items, exclude_mrb=True, timeout=8):
     """查询 csi_datawarehouse.dbo.SLItemLoc，返回 {物料编码: 可用库存数量}（仅含 >0）。
     - site_code: '310' / '410'，对应 SLItemLoc.SiteRef（310 只查 310 库存，410 只查 410）
-    - 库存口径（2026-09-19 更新）：MrbFlag=0（排除报废/待判）
-      + PermFlag=0（排除永久库位）+ Loc NOT LIKE '%floor%'（排除 floor 线边仓）
+    - 库存口径（2026-09-19 确立，2026-09-22 复核后维持不变）：MrbFlag=0（排除报废/待判）
+      + PermFlag=0（排除永久库位）+ Loc NOT LIKE '%floor%'（排除 FLOOR-Core/SPO2/CLR 等线边仓）
+    - 口径依据（2026-09-22 业务确认）：**线边仓视为线上已占用，不算可用库存**；
+      永久库位（PermFlag=1）同样不计入。因此"缺料但有库存"的黄色告警只在
+      常规可领用库位（如 STOCK，且 PermFlag=0）库存充足时才出现。
+    - 已知现象（非 bug）：物料在 STOCK 与 FLOOR-Core 之间移动会导致该工单在黄/红之间切换。
+      案例 J000035104-0000 / D070323：库存 3000 在 FLOOR-Core（被排除）→ 显示红色，属预期。
     查询失败（网络/驱动/权限等）时返回空 dict，不影响主流程。"""
     items = [str(i).strip().upper() for i in items if str(i).strip()]
     if not items:

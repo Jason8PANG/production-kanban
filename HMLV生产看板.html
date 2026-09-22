@@ -110,6 +110,20 @@ select:hover { border-color: #64748b; }
   0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(74, 222, 128, 0.5); }
   50% { opacity: 0.4; box-shadow: 0 0 2px rgba(74, 222, 128, 0.2); }
 }
+/* 手动刷新进行中：小圆点变橙色快速闪动，按钮进入"刷新中…"禁用态 */
+.refresh-status.busy {
+  background: #fb923c !important;
+  box-shadow: 0 0 8px rgba(251, 146, 60, 0.8) !important;
+  animation: pulseBusy 0.6s infinite !important;
+}
+@keyframes pulseBusy {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+button:disabled, .btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 .main {
   padding: 6px 10px;
   height: calc(100vh - 40px);
@@ -377,14 +391,16 @@ canvas { display: block; background: transparent; }
       onfocus="this.style.borderColor='#38bdf8'" onblur="this.style.borderColor='#475569'"
       onkeydown="if(event.key==='Enter')searchWO()" data-i18n="search_placeholder">
     <button class="btn" onclick="searchWO()" style="padding:2px 8px;font-size:10px;">🔍</button>
-    <button class="btn btn-primary" onclick="manualRefresh()" data-i18n="refresh_btn">刷新</button>
+    <button class="btn btn-primary" id="refreshBtn" onclick="manualRefresh()" data-i18n="refresh_btn">刷新</button>
   </div>
   <div class="header-right">
     <div class="refresh-info">
       <span class="refresh-status" id="refreshDot"></span>
-      <span data-i18n="refresh_label">自动刷新:</span> <span id="countdownText">30s</span>
+      <span data-i18n="refresh_label">自动刷新:</span> <span id="countdownText">300s</span>
       &nbsp;|&nbsp;
       <span data-i18n="current_time_label">当前时间:</span> <span id="updated_at">--:--:--</span>
+      &nbsp;|&nbsp;
+      <span data-i18n="data_time_label">数据更新:</span> <span id="dataTime">--:--:--</span>
       &nbsp;|&nbsp;
       <span data-i18n="total_prefix">共 </span><span id="total_records">--</span><span data-i18n="total_suffix"> 条</span>
       &nbsp;|&nbsp;
@@ -564,6 +580,7 @@ const I18N = {
   '310': {
     title:'HMLV生产看板', page_title:'HMLV 生产看板',
     refresh_label:'自动刷新:', current_time_label:'当前时间:',
+    data_time_label:'数据更新:', refreshing_btn:'刷新中…',
     total_prefix:'共 ', total_suffix:' 条',
     search_placeholder:'搜工单号...', refresh_btn:'刷新',
     modal_wo:'工单状态查询', modal_exc:'异常详情',
@@ -591,6 +608,7 @@ const I18N = {
   '410': {
     title:'Penang Production Kanban', page_title:'Penang Kanban',
     refresh_label:'Auto Refresh:', current_time_label:'Time:',
+    data_time_label:'Data:', refreshing_btn:'Refreshing…',
     total_prefix:'Total: ', total_suffix:' records',
     search_placeholder:'Search WO...', refresh_btn:'Refresh',
     modal_wo:'WO Status', modal_exc:'Exception Details',
@@ -658,6 +676,11 @@ function applyI18N(){
     else if(el.tagName==='OPTION') el.textContent=v;
     else el.textContent=v;
   });
+  // 若正处于手动刷新中，按钮文字保持"刷新中…"（避免被 i18n 覆盖回"刷新"）
+  if (window._refreshingBusy) {
+    var rb = document.getElementById('refreshBtn');
+    if (rb) rb.textContent = t('refreshing_btn');
+  }
   document.title = t('page_title');
   STATION_CN = t('stations');
 }
@@ -667,9 +690,11 @@ let pendingRenderAll = null; // 缓存 /api/data 返回的 json，等待 excel_j
 
 // ========== Auto Refresh ==========
 let autoTimer = null;
-let refreshInterval = 30;
-let countdown = 30;
+let refreshInterval = 300;
+let countdown = 300;
 let countdownTimer = null;
+let _refreshGuardTimer = null;   // 手动刷新的兜底恢复定时器
+window._refreshingBusy = false;
 
 function loadData() {
   fetch('/api/data?t=' + Date.now() + '&site=' + currentSite)
@@ -841,7 +866,7 @@ function loadSalesTarget() {
         renderAllTargets();
       }
     })
-    .catch(e => console.error('目标数据加载失败:', e));
+    .catch(e => { console.error('目标数据加载失败:', e); finishManualRefresh(); });
 }
 
 // 统一渲染三个目标卡片
@@ -908,10 +933,37 @@ function renderHoursTarget() {
 }
 
 function manualRefresh() {
+  // 手动刷新：立即反馈 + 重置倒计时 + 记录最后刷新时间（无论后端数据是否变化，用户都能看到反应）
+  var btn = document.getElementById('refreshBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = t('refreshing_btn');
+    if (!_refreshingBusy) document.getElementById('refreshDot').classList.add('busy');
+  }
+  window._refreshingBusy = true;
+  resetCountdown();
+  updateClock();   // 立刻把"最后刷新"时间跳到当前
+
   loadData();
   loadExcelJobs();
   loadWIP();
   loadSalesTarget();
+
+  // 兜底：2 秒内无论请求是否返回，都恢复按钮可用（避免任何异常导致按钮永久锁死）
+  if (_refreshGuardTimer) clearTimeout(_refreshGuardTimer);
+  _refreshGuardTimer = setTimeout(finishManualRefresh, 2000);
+}
+
+function finishManualRefresh() {
+  if (_refreshGuardTimer) { clearTimeout(_refreshGuardTimer); _refreshGuardTimer = null; }
+  window._refreshingBusy = false;
+  var btn = document.getElementById('refreshBtn');
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = t('refresh_btn');
+  }
+  var dot = document.getElementById('refreshDot');
+  if (dot) dot.classList.remove('busy');
 }
 
 function resetCountdown() {
@@ -927,7 +979,7 @@ function startAutoRefresh(sec) {
   const dot = document.getElementById('refreshDot');
   if (sec > 0) {
     dot.style.background = '#4ade80';
-    autoTimer = setInterval(function(){ loadData(); loadExcelJobs(); loadWIP(); }, sec * 1000);
+    autoTimer = setInterval(function(){ loadData(); loadExcelJobs(); loadWIP(); loadSalesTarget(); }, sec * 1000);
     countdown = sec;
     countdownTimer = setInterval(() => {
       countdown--;
@@ -959,6 +1011,8 @@ function renderAll(json) {
   _apiJson = json;
 
   document.getElementById('updated_at').textContent = json.updated_at || '--';
+  window._lastDataTime = json.updated_at || '';
+  finishManualRefresh();
   document.getElementById('total_records').textContent = (json.kpi && json.kpi.total_records) || json.total_records || 0;
 
   // 工序完成进度 将 API 返回的扁平结构重新整理为前端期望的 stats 格式
@@ -1152,7 +1206,10 @@ function loadWIP() {
         renderWIP(json.data);
       }
     })
-    .catch(e => console.error('WIP数据加载失败:', e));
+    .catch(e => {
+      console.error('WIP数据加载失败:', e);
+      finishManualRefresh();
+    });
 }
 
 function renderWIP(data) {
@@ -1460,13 +1517,20 @@ function escHtml(s) {
 }
 
 
-// 实时时钟
+// 实时时钟：同时显示"最后刷新时间"（数据更新时间，由 /api/data 提供）
 function updateClock() {
   const now = new Date();
   const h = String(now.getHours()).padStart(2, '0');
   const m = String(now.getMinutes()).padStart(2, '0');
   const s = String(now.getSeconds()).padStart(2, '0');
-  document.getElementById('updated_at').textContent = h + ':' + m + ':' + s;
+  const el = document.getElementById('updated_at');
+  if (el) el.textContent = h + ':' + m + ':' + s;
+  // 数据最后更新时间（不参与秒级跳动，只在刷新/自动刷新后更新）
+  const dEl = document.getElementById('dataTime');
+  if (dEl) {
+    const dt = window._lastDataTime || '';
+    dEl.textContent = dt ? dt.substring(11, 19) : '--:--:--';
+  }
 }
 setInterval(updateClock, 1000);
 updateClock();
