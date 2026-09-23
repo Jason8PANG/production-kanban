@@ -1462,8 +1462,12 @@ function showExcModal(job) {
   html += '</div>';
   excList.forEach(function(e, idx) {
     var isStock = !!(e.stock_ok);
-    var badgeBg = isStock ? '#facc15' : (e.active ? '#dc2626' : '#f59e0b');
-    var badgeText = isStock ? t('exc_stock_alert') : (e.active ? t('exc_active') : t('exc_resolved'));
+    // ★ /api/wip 只返回活跃异常（WHERE end_time IS NULL 且工序未完成），对象里没有 active 字段；
+    //   只有 /api/search_wo 的异常带 active。此处按"有该字段才看它，没有就视为活跃"判断，
+    //   避免 WIP 点进来时误显示「已解决」。
+    var isActive = (e.active === undefined) ? true : !!e.active;
+    var badgeBg = isStock ? '#facc15' : (isActive ? '#dc2626' : '#f59e0b');
+    var badgeText = isStock ? t('exc_stock_alert') : (isActive ? t('exc_active') : t('exc_resolved'));
     var cardBg = isStock ? '#78350f33' : '#7f1d1d22';
     var titleColor = isStock ? '#fde047' : '#fca5a5';
     var descColor = isStock ? '#fde047' : '#fca5a5';
