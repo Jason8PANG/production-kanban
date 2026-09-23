@@ -1467,15 +1467,20 @@ function showExcModal(job) {
     //   避免 WIP 点进来时误显示「已解决」。
     var isActive = (e.active === undefined) ? true : !!e.active;
     var badgeBg = isStock ? '#facc15' : (isActive ? '#dc2626' : '#f59e0b');
-    var badgeText = isStock ? t('exc_stock_alert') : (isActive ? t('exc_active') : t('exc_resolved'));
+    // 活跃异常不显示文字，只用一个实心圆点标识；已解决 / 库存告警保留文字
+    var badgeText = isStock ? t('exc_stock_alert') : (isActive ? '\u25cf' : t('exc_resolved'));
     var cardBg = isStock ? '#78350f33' : '#7f1d1d22';
     var titleColor = isStock ? '#fde047' : '#fca5a5';
     var descColor = isStock ? '#fde047' : '#fca5a5';
     var badgeFg = isStock ? '#0f172a' : badgeBg;
+    // 活跃 → 只画一个实心圆点（无文字）；其余状态沿用胶囊徽标
+    var badgeStyle = isActive && !isStock
+      ? 'background:' + badgeBg + ';color:' + badgeFg + ';display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;'
+      : 'background:' + badgeBg + '22;color:' + badgeFg + ';padding:1px 8px;border-radius:8px;font-size:10px;border:1px solid ' + badgeBg + '44;';
     html += '<div style="padding:10px;background:' + cardBg + ';border-radius:6px;margin-bottom:8px;border-left:3px solid ' + badgeBg + ';">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
     html += '<span style="color:' + titleColor + ';font-weight:600;">\u26a0 ' + t('exc_title') + (idx + 1) + '</span>';
-    html += '<span style="background:' + badgeBg + '22;color:' + badgeFg + ';padding:1px 8px;border-radius:8px;font-size:10px;border:1px solid ' + badgeBg + '44;">' + badgeText + '</span>';
+    html += '<span style="' + badgeStyle + '"' + (isActive && !isStock ? ' title="' + escHtml(t('exc_active')) + '"' : '') + '>' + (isActive && !isStock ? '' : badgeText) + '</span>';
     html += '</div>';
     html += '<div style="margin-bottom:4px;"><span style="color:#94a3b8;display:inline-block;width:70px;">' + t('exc_station') + '</span><span style="color:#e2e8f0;">' + escHtml(e.station) + '</span></div>';
     // ★ 异常类别
